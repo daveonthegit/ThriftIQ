@@ -14,6 +14,54 @@ This repository is initialized for the v2 web prototype, focused on validating t
 
 The current PRD lives at [docs/thriftiq_prd_v2_web_prototype.md](docs/thriftiq_prd_v2_web_prototype.md).
 
-## Status
+## Tech Stack
 
-Initial repository setup is complete. Application code has not been added yet.
+- Next.js 15 App Router
+- TypeScript
+- Tamagui
+- TanStack Query
+- React Hook Form + Zod
+- Clerk
+- Supabase Postgres and Storage
+- Drizzle ORM
+- Upstash Redis
+- Vercel AI SDK
+- Vercel Analytics
+
+## Getting Started
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Copy environment variables:
+
+```bash
+cp .env.example .env.local
+```
+
+Run the development server:
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+## Database
+
+The Drizzle schema lives in [src/lib/db/schema.ts](src/lib/db/schema.ts).
+
+Generate migrations:
+
+```bash
+npm run db:generate
+```
+
+Apply migrations:
+
+```bash
+npm run db:migrate
+```
