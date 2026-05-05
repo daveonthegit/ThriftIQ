@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
+import { databaseUnavailableResponse, internalErrorResponse } from '@/lib/api/errors'
 import { getCurrentAppUser } from '@/lib/auth/current-user'
-import { db } from '@/lib/db/client'
+import { db, isDatabaseConfigured } from '@/lib/db/client'
 import { inventoryItems } from '@/lib/db/schema'
 
 const createInventorySchema = z.object({
@@ -30,51 +31,67 @@ function mapInventoryItem(row: typeof inventoryItems.$inferSelect) {
 }
 
 export async function GET(request: Request) {
-  const user = await getCurrentAppUser(request)
+  try {
+    if (!isDatabaseConfigured) {
+      return databaseUnavailableResponse()
+    }
 
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const user = await getCurrentAppUser(request)
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const rows = await db
+      .select()
+      .from(inventoryItems)
+      .where(eq(inventoryItems.userId, user.id))
+      .orderBy(desc(inventoryItems.createdAt))
+
+    return NextResponse.json({ items: rows.map(mapInventoryItem) })
+  } catch (error) {
+    return internalErrorResponse(error, 'Could not load inventory')
   }
-
-  const rows = await db
-    .select()
-    .from(inventoryItems)
-    .where(eq(inventoryItems.userId, user.id))
-    .orderBy(desc(inventoryItems.createdAt))
-
-  return NextResponse.json({ items: rows.map(mapInventoryItem) })
 }
 
 export async function POST(request: Request) {
-  const user = await getCurrentAppUser(request)
+  try {
+    if (!isDatabaseConfigured) {
+      return databaseUnavailableResponse()
+    }
 
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const user = await getCurrentAppUser(request)
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const parsed = createInventorySchema.safeParse(await request.json())
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid inventory item' }, { status: 400 })
+    }
+
+    const profit = parsed.data.est - parsed.data.cost
+    const marginBps = parsed.data.cost > 0 ? Math.round((profit / parsed.data.cost) * 10_000) : 0
+
+    const [row] = await db
+      .insert(inventoryItems)
+      .values({
+        userId: user.id,
+        title: parsed.data.title,
+        itemCost: String(parsed.data.cost),
+        targetListPrice: String(parsed.data.est),
+        estimatedProfit: String(profit),
+        estimatedMarginBps: marginBps,
+        status: 'sourced',
+        swatch: parsed.data.swatch,
+        swatch2: parsed.data.swatch2,
+      })
+      .returning()
+
+    return NextResponse.json({ item: mapInventoryItem(row) }, { status: 201 })
+  } catch (error) {
+    return internalErrorResponse(error, 'Could not create inventory item')
   }
-
-  const parsed = createInventorySchema.safeParse(await request.json())
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid inventory item' }, { status: 400 })
-  }
-
-  const profit = parsed.data.est - parsed.data.cost
-  const marginBps = parsed.data.cost > 0 ? Math.round((profit / parsed.data.cost) * 10_000) : 0
-
-  const [row] = await db
-    .insert(inventoryItems)
-    .values({
-      userId: user.id,
-      title: parsed.data.title,
-      itemCost: String(parsed.data.cost),
-      targetListPrice: String(parsed.data.est),
-      estimatedProfit: String(profit),
-      estimatedMarginBps: marginBps,
-      status: 'sourced',
-      swatch: parsed.data.swatch,
-      swatch2: parsed.data.swatch2,
-    })
-    .returning()
-
-  return NextResponse.json({ item: mapInventoryItem(row) }, { status: 201 })
 }

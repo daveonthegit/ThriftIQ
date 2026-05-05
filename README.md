@@ -146,12 +146,22 @@ For a hosted Supabase project:
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: the `sb_publishable_...` key
    - `SUPABASE_SECRET_KEY`: the `sb_secret_...` key
 4. In `Project Settings` -> `Data API`, copy the Project URL into `NEXT_PUBLIC_SUPABASE_URL`.
-5. In `Project Settings` -> `Database`, copy the Postgres connection string into `DATABASE_URL`.
+5. In `Project Settings` -> `Database`, copy a Postgres connection string into `DATABASE_URL`.
 6. In `Storage`, create a private bucket named `receipts`.
 
 Do not put `SUPABASE_SECRET_KEY` in browser code or paste it into chat.
 
 Authentication uses Supabase Auth. In the Supabase dashboard, enable email/password auth under `Authentication` -> `Providers` -> `Email`. OAuth buttons require enabling the matching Supabase provider first.
+
+For Vercel production, use the Supabase connection pooler URL for `DATABASE_URL`, not the direct `db.<project-ref>.supabase.co` URL. In Supabase, open `Project Settings` -> `Database` -> `Connection string` and choose the pooler connection string. Vercel/serverless deployments should use the transaction pooler host, usually on port `6543`, because direct database hosts can fail DNS/network resolution from serverless runtimes.
+
+The production `DATABASE_URL` should look similar to:
+
+```text
+postgresql://postgres.<project-ref>:<encoded-password>@aws-...pooler.supabase.com:6543/postgres?sslmode=require
+```
+
+If username login fails but email login starts working, check `DATABASE_URL` first. Username login resolves `users.username` through Postgres, while plain email login can reach Supabase Auth before app account data is loaded.
 
 You can also create or verify the private `receipts` bucket from the repo:
 
