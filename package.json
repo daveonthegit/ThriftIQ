@@ -21,6 +21,7 @@
     "storage:setup:bash": "bash scripts/storage-setup.sh",
     "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1",
     "build": "next build",
+    "build:local": "node scripts/build-local.mjs",
     "start": "next start",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "typecheck": "tsc --noEmit",

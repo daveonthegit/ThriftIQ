@@ -103,6 +103,14 @@ if [[ ! -x "node_modules/.bin/next" ]]; then
   npm install
 fi
 
+eval "$("$NODE_BIN" scripts/env-resolve.mjs --shell)"
+export DATABASE_URL
+export THRIFTIQ_DATABASE_URL_SOURCE
+export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}"
+export NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}"
+export SUPABASE_SECRET_KEY="${SUPABASE_SECRET_KEY:-}"
+echo "Using database URL from $THRIFTIQ_DATABASE_URL_SOURCE."
+
 if [[ "$SKIP_DB" != "true" ]]; then
   echo "Preparing database..."
   bash scripts/db-setup.sh

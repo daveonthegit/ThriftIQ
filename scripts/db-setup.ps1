@@ -28,41 +28,31 @@ function Ensure-LocalEnvironment {
     Write-Host 'Created .env.local from .env.example.'
   }
 
-  $content = Get-Content -LiteralPath $envLocal
-  $hasDatabaseUrl = $false
-  $updated = foreach ($line in $content) {
-    if ($line -match '^DATABASE_URL=') {
-      $hasDatabaseUrl = $true
-      if ($line.Trim() -eq 'DATABASE_URL=') {
-        "DATABASE_URL=$DatabaseUrl"
-      } else {
-        $line
-      }
-    } else {
-      $line
-    }
-  }
-
-  if (-not $hasDatabaseUrl) {
-    $updated += "DATABASE_URL=$DatabaseUrl"
-  }
-
-  Set-Content -LiteralPath $envLocal -Value $updated
-  $env:DATABASE_URL = Get-DatabaseUrlFromEnvFile -Path $envLocal
+  Set-ResolvedEnvironment
 }
 
-function Get-DatabaseUrlFromEnvFile {
-  param([string]$Path)
-
-  $line = Get-Content -LiteralPath $Path |
-    Where-Object { $_ -match '^DATABASE_URL=' } |
-    Select-Object -First 1
-
-  if (-not $line) {
-    return $DatabaseUrl
+function Set-ResolvedEnvironment {
+  $json = & node (Join-Path $PSScriptRoot 'env-resolve.mjs')
+  if ($LASTEXITCODE -ne 0) {
+    throw 'Could not resolve local environment.'
   }
 
-  return $line.Substring('DATABASE_URL='.Length).Trim('"').Trim("'")
+  $resolved = $json | ConvertFrom-Json
+  $env:DATABASE_URL = $resolved.databaseUrl
+  $env:THRIFTIQ_DATABASE_URL_SOURCE = $resolved.databaseUrlSource
+
+  if ($resolved.supabasePublicKey) {
+    $env:NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = $resolved.supabasePublicKey
+    $env:NEXT_PUBLIC_SUPABASE_ANON_KEY = $resolved.supabasePublicKey
+    $env:THRIFTIQ_SUPABASE_PUBLIC_KEY_SOURCE = $resolved.supabasePublicKeySource
+  }
+
+  if ($resolved.supabaseSecretKey) {
+    $env:SUPABASE_SECRET_KEY = $resolved.supabaseSecretKey
+    $env:THRIFTIQ_SUPABASE_SECRET_KEY_SOURCE = $resolved.supabaseSecretKeySource
+  }
+
+  Write-Host "Using database URL from $($resolved.databaseUrlSource)."
 }
 
 function Test-DatabasePort {

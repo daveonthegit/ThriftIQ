@@ -1,27 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolveLocalEnvironment } from './env-resolve.mjs'
 
 function readDatabaseUrl() {
-  if (process.argv[2]) {
-    return process.argv[2]
-  }
-
-  if (process.env.DATABASE_URL) {
-    return process.env.DATABASE_URL
-  }
-
-  const envPath = resolve(process.cwd(), '.env.local')
-  if (!existsSync(envPath)) {
-    return ''
-  }
-
-  const line = readFileSync(envPath, 'utf8')
-    .split(/\r?\n/)
-    .find(value => value.startsWith('DATABASE_URL='))
-
-  return line
-    ? line.slice('DATABASE_URL='.length).trim().replace(/^["']|["']$/g, '')
-    : ''
+  return resolveLocalEnvironment().databaseUrl
 }
 
 const args = process.argv.slice(2)

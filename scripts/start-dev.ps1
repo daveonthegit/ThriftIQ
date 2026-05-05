@@ -63,6 +63,30 @@ function Ensure-Dependencies {
   }
 }
 
+function Set-ResolvedEnvironment {
+  $json = & node (Join-Path $PSScriptRoot 'env-resolve.mjs')
+  if ($LASTEXITCODE -ne 0) {
+    throw 'Could not resolve local environment.'
+  }
+
+  $resolved = $json | ConvertFrom-Json
+  $env:DATABASE_URL = $resolved.databaseUrl
+  $env:THRIFTIQ_DATABASE_URL_SOURCE = $resolved.databaseUrlSource
+
+  if ($resolved.supabasePublicKey) {
+    $env:NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = $resolved.supabasePublicKey
+    $env:NEXT_PUBLIC_SUPABASE_ANON_KEY = $resolved.supabasePublicKey
+    $env:THRIFTIQ_SUPABASE_PUBLIC_KEY_SOURCE = $resolved.supabasePublicKeySource
+  }
+
+  if ($resolved.supabaseSecretKey) {
+    $env:SUPABASE_SECRET_KEY = $resolved.supabaseSecretKey
+    $env:THRIFTIQ_SUPABASE_SECRET_KEY_SOURCE = $resolved.supabaseSecretKeySource
+  }
+
+  Write-Host "Using database URL from $($resolved.databaseUrlSource)."
+}
+
 function Stop-LocalSupabase {
   if ($KeepDb) {
     Write-Host 'Keeping database running.'
@@ -92,6 +116,7 @@ function Stop-LocalSupabase {
 
 Ensure-LocalEnvironment
 Ensure-Dependencies
+Set-ResolvedEnvironment
 
 if (-not $SkipDb) {
   Write-Host 'Preparing database...'

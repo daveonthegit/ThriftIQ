@@ -48,6 +48,8 @@ Open `http://localhost:3000`.
 
 The start script clears the target port, installs dependencies if needed, checks the database, applies migrations, starts the app, and keeps the terminal interactive. Type `:q` and press Enter to stop the dev server and clear the port. Hosted Supabase projects are left running automatically; local Supabase is stopped only when `DATABASE_URL` points at `127.0.0.1:54322`.
 
+The local scripts resolve environment variables the same way production does. They prefer the Vercel/Supabase integration database URL names (`POSTGRES_URL`, then `POSTGRES_PRISMA_URL`) before `DATABASE_URL`, and they map Supabase key aliases into the `NEXT_PUBLIC_*`/server names the app uses.
+
 Use another port in PowerShell:
 
 ```powershell
@@ -124,6 +126,12 @@ Run these before shipping changes:
 
 ```powershell
 npm run verify
+```
+
+Build locally using the same env resolution as the startup scripts:
+
+```powershell
+npm run build:local
 ```
 
 Check deployment readiness:

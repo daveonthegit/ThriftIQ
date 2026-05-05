@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_DATABASE_URL="${DATABASE_URL:-postgres://postgres:postgres@127.0.0.1:54322/postgres}"
 SKIP_SUPABASE_START="${SKIP_SUPABASE_START:-false}"
 
 cd "$ROOT"
@@ -35,17 +34,14 @@ ensure_env() {
     echo "Created .env.local from .env.example."
   fi
 
-  if grep -q '^DATABASE_URL=' .env.local; then
-    if grep -q '^DATABASE_URL=$' .env.local; then
-      sed -i.bak "s|^DATABASE_URL=$|DATABASE_URL=$DEFAULT_DATABASE_URL|" .env.local
-      rm -f .env.local.bak
-    fi
-  else
-    printf '\nDATABASE_URL=%s\n' "$DEFAULT_DATABASE_URL" >> .env.local
-  fi
-
-  DATABASE_URL="$(grep '^DATABASE_URL=' .env.local | head -n 1 | cut -d '=' -f 2- | sed "s/^['\"]//;s/['\"]$//")"
+  eval "$("$NODE_BIN" scripts/env-resolve.mjs --shell)"
   export DATABASE_URL
+  export THRIFTIQ_DATABASE_URL_SOURCE
+  export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}"
+  export NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}"
+  export SUPABASE_SECRET_KEY="${SUPABASE_SECRET_KEY:-}"
+
+  echo "Using database URL from $THRIFTIQ_DATABASE_URL_SOURCE."
 }
 
 check_port() {
