@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
-import { db } from '@/lib/db/client'
+import { databaseUnavailableResponse, internalErrorResponse } from '@/lib/api/errors'
+import { db, isDatabaseConfigured } from '@/lib/db/client'
 import { users } from '@/lib/db/schema'
 import { createSupabaseAdminClient } from '@/lib/supabase/server'
 
@@ -24,60 +25,68 @@ function fallbackUsername(email: string) {
 }
 
 export async function POST(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const token = authHeader?.replace(/^Bearer\s+/i, '')
+  try {
+    if (!isDatabaseConfigured) {
+      return databaseUnavailableResponse()
+    }
 
-  if (!token) {
-    return NextResponse.json({ error: 'Missing auth token' }, { status: 401 })
-  }
+    const authHeader = request.headers.get('authorization')
+    const token = authHeader?.replace(/^Bearer\s+/i, '')
 
-  const body = request.headers.get('content-length') === '0'
-    ? {}
-    : await request.json().catch(() => ({}))
-  const parsed = requestSchema.safeParse(body)
+    if (!token) {
+      return NextResponse.json({ error: 'Missing auth token' }, { status: 401 })
+    }
 
-  if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid username' }, { status: 400 })
-  }
+    const body = request.headers.get('content-length') === '0'
+      ? {}
+      : await request.json().catch(() => ({}))
+    const parsed = requestSchema.safeParse(body)
 
-  const supabase = createSupabaseAdminClient()
-  const { data, error } = await supabase.auth.getUser(token)
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid username' }, { status: 400 })
+    }
 
-  if (error || !data.user?.email) {
-    return NextResponse.json({ error: 'Invalid auth token' }, { status: 401 })
-  }
+    const supabase = createSupabaseAdminClient()
+    const { data, error } = await supabase.auth.getUser(token)
 
-  const email = data.user.email.toLowerCase()
-  const username = (parsed.data.username ?? fallbackUsername(email)).toLowerCase()
+    if (error || !data.user?.email) {
+      return NextResponse.json({ error: 'Invalid auth token' }, { status: 401 })
+    }
 
-  const [usernameOwner] = await db
-    .select({ id: users.id, supabaseAuthId: users.supabaseAuthId })
-    .from(users)
-    .where(eq(users.username, username))
-    .limit(1)
+    const email = data.user.email.toLowerCase()
+    const username = (parsed.data.username ?? fallbackUsername(email)).toLowerCase()
 
-  if (usernameOwner && usernameOwner.supabaseAuthId !== data.user.id) {
-    return NextResponse.json({ error: 'Username is already taken' }, { status: 409 })
-  }
+    const [usernameOwner] = await db
+      .select({ id: users.id, supabaseAuthId: users.supabaseAuthId })
+      .from(users)
+      .where(eq(users.username, username))
+      .limit(1)
 
-  const [existing] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.supabaseAuthId, data.user.id))
-    .limit(1)
+    if (usernameOwner && usernameOwner.supabaseAuthId !== data.user.id) {
+      return NextResponse.json({ error: 'Username is already taken' }, { status: 409 })
+    }
 
-  if (existing) {
-    await db
-      .update(users)
-      .set({ email, username, updatedAt: new Date() })
+    const [existing] = await db
+      .select({ id: users.id })
+      .from(users)
       .where(eq(users.supabaseAuthId, data.user.id))
-  } else {
-    await db.insert(users).values({
-      supabaseAuthId: data.user.id,
-      email,
-      username,
-    })
-  }
+      .limit(1)
 
-  return NextResponse.json({ ok: true, username })
+    if (existing) {
+      await db
+        .update(users)
+        .set({ email, username, updatedAt: new Date() })
+        .where(eq(users.supabaseAuthId, data.user.id))
+    } else {
+      await db.insert(users).values({
+        supabaseAuthId: data.user.id,
+        email,
+        username,
+      })
+    }
+
+    return NextResponse.json({ ok: true, username })
+  } catch (error) {
+    return internalErrorResponse(error, 'Could not sync auth profile')
+  }
 }
