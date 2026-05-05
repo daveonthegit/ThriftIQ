@@ -1,14 +1,16 @@
 'use client'
 
-import { CSSProperties, ReactNode, useEffect, useMemo, useState } from 'react'
+import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
+import { Session } from '@supabase/supabase-js'
 import {
   ACCENTS, Accent, FONT_BODY, FONT_DISPLAY_BY_THEME, FONT_MONO,
-  INITIAL_INVENTORY, InventoryItem, Item, RECENT, THEMES, Theme, TRENDING,
-  calcProfit, findItem, stats,
+  InventoryItem, Item, RECENT, THEMES, Theme, TRENDING,
+  calcProfit, stats,
 } from './data'
 import { Icons, Swatch } from './icons'
+import { createSupabaseBrowserClient } from '@/lib/supabase/browser'
 
-type Route = 'search' | 'item' | 'inventory' | 'history' | 'profit'
+type Route = 'search' | 'item' | 'inventory' | 'history' | 'profit' | 'settings'
 
 const THEME: Theme = 'streetwear'
 const ACCENT: Accent = 'acid'
@@ -17,6 +19,7 @@ const BUY_THRESHOLD = 50
 const T = THEMES[THEME]
 const A = ACCENTS[ACCENT]
 const display = FONT_DISPLAY_BY_THEME[THEME]
+const MOBILE_BREAKPOINT = 820
 
 type SearchRecord = {
   id: string
@@ -26,6 +29,88 @@ type SearchRecord = {
   confidence: string
   verdict: 'BUY' | 'SKIP' | 'WATCH'
   searchedAt: string
+}
+
+type AccountProfile = {
+  id: string
+  email: string
+  username: string
+  initials: string
+  plan: string
+  searchCount: number
+  searchLimit: number | null
+  unlimitedSearches: boolean
+}
+
+async function syncSupabaseProfile(accessToken: string, username?: string) {
+  const response = await fetch('/api/auth/sync-profile', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(username ? { username } : {}),
+  })
+  const body = await response.json().catch(() => ({})) as { error?: string }
+
+  if (!response.ok) {
+    throw new Error(body.error ?? 'Could not sync profile')
+  }
+}
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const query = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`)
+    const update = () => setIsMobile(query.matches)
+
+    update()
+    query.addEventListener('change', update)
+
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  return isMobile
+}
+
+function pageStyle(isMobile: boolean): CSSProperties {
+  return {
+    flex: 1,
+    overflow: 'auto',
+    padding: isMobile ? '22px 16px 104px' : '28px 40px 60px',
+  }
+}
+
+function pageHeaderStyle(isMobile: boolean): CSSProperties {
+  return {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: isMobile ? 'stretch' : 'flex-end',
+    flexDirection: isMobile ? 'column' : 'row',
+    gap: isMobile ? 16 : 20,
+    marginBottom: isMobile ? 20 : 26,
+  }
+}
+
+function pageTitleStyle(isMobile: boolean): CSSProperties {
+  return {
+    fontFamily: display,
+    fontSize: isMobile ? 36 : 48,
+    lineHeight: 1,
+    fontWeight: 600,
+    marginTop: 6,
+    color: T.text,
+  }
+}
+
+function kpiGridStyle(isMobile: boolean): CSSProperties {
+  return {
+    display: 'grid',
+    gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, 1fr)',
+    gap: isMobile ? 10 : 14,
+    marginBottom: isMobile ? 20 : 26,
+  }
 }
 
 // ─── Atoms ──────────────────────────────────────────────────────────────────
@@ -49,7 +134,7 @@ function WBtn({
       ...variants[variant], height: sz.h, padding: `0 ${sz.px}px`,
       width: full ? '100%' : undefined,
       borderRadius: 10, fontFamily: FONT_BODY, fontSize: sz.fs, fontWeight: 700,
-      letterSpacing: 0.02, cursor: disabled ? 'not-allowed' : 'pointer',
+      letterSpacing: 0, cursor: disabled ? 'not-allowed' : 'pointer',
       opacity: disabled ? 0.4 : 1,
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
       transition: 'transform .1s, filter .15s', ...style,
@@ -90,10 +175,90 @@ function WPill({ children, kind = 'mute' }: {
 
 // ─── Sign-in ────────────────────────────────────────────────────────────────
 function WebSignIn({ onAuth }: { onAuth: () => void }) {
+  const isMobile = useIsMobile()
   const [loading, setLoading] = useState<string | null>(null)
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [identifier, setIdentifier] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
-  const auth = (m: string) => { setLoading(m); setTimeout(onAuth, 700) }
+  const submitEmail = async (event?: FormEvent) => {
+    event?.preventDefault()
+    setLoading('email')
+    setError(null)
+    setNotice(null)
+
+    const loginIdentifier = identifier.trim().toLowerCase()
+    const normalizedUsername = username.trim().toLowerCase()
+
+    let email = loginIdentifier
+
+    if (mode === 'signin' && !loginIdentifier.includes('@')) {
+      const response = await fetch('/api/auth/resolve-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: loginIdentifier }),
+      })
+      const body = await response.json() as { email?: string; error?: string }
+
+      if (!response.ok || !body.email) {
+        setError(body.error ?? 'Invalid email, username, or password')
+        setLoading(null)
+        return
+      }
+
+      email = body.email
+    }
+
+    const credentials = { email, password }
+    const result = mode === 'signin'
+      ? await supabase.auth.signInWithPassword(credentials)
+      : await supabase.auth.signUp({
+        ...credentials,
+        options: { data: { username: normalizedUsername } },
+      })
+
+    setLoading(null)
+
+    if (result.error) {
+      setError(result.error.message)
+      return
+    }
+
+    if (result.data.session) {
+      try {
+        await syncSupabaseProfile(result.data.session.access_token, mode === 'signup' ? normalizedUsername : undefined)
+      } catch (profileError) {
+        setError(profileError instanceof Error ? profileError.message : 'Could not sync profile')
+        return
+      }
+      onAuth()
+      return
+    }
+
+    setNotice('Check your email to confirm your account, then sign in.')
+  }
+
+  const authWithProvider = async (provider: 'google' | 'apple') => {
+    setLoading(provider)
+    setError(null)
+    setNotice(null)
+
+    const { error: providerError } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: window.location.origin,
+      },
+    })
+
+    if (providerError) {
+      setError(providerError.message)
+      setLoading(null)
+    }
+  }
 
   const accentRGB = (() => {
     const h = A.hex.replace('#', '')
@@ -102,11 +267,19 @@ function WebSignIn({ onAuth }: { onAuth: () => void }) {
   })()
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: T.bg, color: T.text }}>
+    <div style={{
+      display: 'flex',
+      flexDirection: isMobile ? 'column' : 'row',
+      minHeight: '100vh',
+      background: T.bg,
+      color: T.text,
+    }}>
       <div style={{
-        flex: 1.2, position: 'relative', overflow: 'hidden',
+        flex: isMobile ? '0 0 auto' : 1.2, position: 'relative', overflow: 'hidden',
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-        padding: 56, minHeight: '100vh', background: T.bg,
+        padding: isMobile ? 24 : 56,
+        minHeight: isMobile ? 260 : '100vh',
+        background: T.bg,
       }}>
         <div style={{
           position: 'absolute', inset: 0, zIndex: 0,
@@ -124,7 +297,7 @@ function WebSignIn({ onAuth }: { onAuth: () => void }) {
           backgroundSize: '5px 5px', mixBlendMode: 'multiply',
         }} />
         <div style={{
-          position: 'absolute', top: 56, right: 56, zIndex: 1,
+          position: 'absolute', top: isMobile ? 24 : 56, right: isMobile ? 24 : 56, zIndex: 1,
           padding: '5px 12px', background: A.hex, color: A.ink,
           fontFamily: FONT_MONO, fontSize: 11, fontWeight: 700,
           letterSpacing: 0.18, textTransform: 'uppercase',
@@ -135,18 +308,18 @@ function WebSignIn({ onAuth }: { onAuth: () => void }) {
           <div style={{
             fontFamily: FONT_MONO, fontSize: 11,
             letterSpacing: 0.2, textTransform: 'uppercase', color: T.textMute,
-          }}>ThriftIQ ◇ v2 prototype</div>
+          }}>ThriftIQ ◇ sourcing workspace</div>
         </div>
 
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{
-            fontFamily: display, fontSize: 132, lineHeight: 0.88,
-            letterSpacing: -0.04, fontWeight: 500,
+            fontFamily: display, fontSize: isMobile ? 72 : 132, lineHeight: 0.88,
+            letterSpacing: 0, fontWeight: 500,
           }}>
             Thrift<span style={{ fontStyle: 'italic', color: A.hex }}>IQ</span>
           </div>
           <div style={{
-            fontFamily: '"Bebas Neue"', fontSize: 56, lineHeight: 0.95,
+            fontFamily: '"Bebas Neue"', fontSize: isMobile ? 34 : 56, lineHeight: 0.95,
             letterSpacing: 0.02, marginTop: 16, color: T.text,
           }}>
             Source <span style={{ color: A.hex }}>smarter.</span>
@@ -156,7 +329,9 @@ function WebSignIn({ onAuth }: { onAuth: () => void }) {
 
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
-        justifyContent: 'center', padding: '40px 64px', maxWidth: 540,
+        justifyContent: 'center',
+        padding: isMobile ? '28px 18px 38px' : '40px 64px',
+        maxWidth: isMobile ? 'none' : 540,
       }}>
         <div style={{
           fontFamily: FONT_MONO, fontSize: 11, color: A.hex,
@@ -164,7 +339,7 @@ function WebSignIn({ onAuth }: { onAuth: () => void }) {
         }}>{mode === 'signin' ? 'Welcome back' : 'Get started'}</div>
         <div style={{
           fontFamily: display, fontSize: 44, lineHeight: 1.05,
-          fontWeight: 500, marginTop: 8, letterSpacing: -0.01,
+          fontWeight: 500, marginTop: 8, letterSpacing: 0,
         }}>
           {mode === 'signin' ? (
             <>Sign in to <span style={{ fontStyle: 'italic', color: A.hex }}>ThriftIQ</span></>
@@ -187,27 +362,44 @@ function WebSignIn({ onAuth }: { onAuth: () => void }) {
           ))}
         </div>
 
-        <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <input placeholder="you@studio.com" style={{
+        <form onSubmit={submitEmail} style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <input value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder={mode === 'signin' ? 'Email or username' : 'you@studio.com'} type={mode === 'signin' ? 'text' : 'email'} required style={{
             height: 50, padding: '0 16px', borderRadius: 12,
             background: T.surface, border: `1px solid ${T.border}`,
             color: T.text, fontFamily: FONT_BODY, fontSize: 14, outline: 'none',
           }} />
-          <input placeholder="Password" type="password" style={{
+          {mode === 'signup' && (
+            <input value={username} onChange={event => setUsername(event.target.value.toLowerCase())} placeholder="Username" pattern="[a-z0-9_]{3,24}" required style={{
+              height: 50, padding: '0 16px', borderRadius: 12,
+              background: T.surface, border: `1px solid ${T.border}`,
+              color: T.text, fontFamily: FONT_BODY, fontSize: 14, outline: 'none',
+            }} />
+          )}
+          <input value={password} onChange={event => setPassword(event.target.value)} placeholder="Password" type="password" required minLength={6} style={{
             height: 50, padding: '0 16px', borderRadius: 12,
             background: T.surface, border: `1px solid ${T.border}`,
             color: T.text, fontFamily: FONT_BODY, fontSize: 14, outline: 'none',
           }} />
-        </div>
 
-        <div style={{ marginTop: 14 }}>
-          <WBtn full size="lg" onClick={() => auth('email')}>
+          {(error || notice) && (
+            <div style={{
+              padding: '10px 12px', borderRadius: 10,
+              background: error ? 'rgba(255,59,47,0.12)' : T.surface,
+              border: `1px solid ${error ? T.skip : T.border}`,
+              color: error ? '#ff9a92' : T.textMute,
+              fontSize: 12, lineHeight: 1.45,
+            }}>
+              {error ?? notice}
+            </div>
+          )}
+
+          <WBtn full size="lg" type="submit" disabled={loading === 'email'}>
             {loading === 'email'
               ? mode === 'signin' ? 'Signing in…' : 'Creating account…'
               : mode === 'signin' ? 'Sign in' : 'Create account'}
             {!loading && Icons.arrow}
           </WBtn>
-        </div>
+        </form>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '20px 0' }}>
           <div style={{ flex: 1, height: 1, background: T.border }} />
@@ -218,11 +410,11 @@ function WebSignIn({ onAuth }: { onAuth: () => void }) {
           <div style={{ flex: 1, height: 1, background: T.border }} />
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <WBtn variant="secondary" full size="lg" onClick={() => auth('google')} style={{ flex: 1 }}>
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 10 }}>
+          <WBtn variant="secondary" full size="lg" onClick={() => authWithProvider('google')} style={{ flex: 1 }}>
             {loading === 'google' ? '…' : <>{Icons.google} <span>Google</span></>}
           </WBtn>
-          <WBtn variant="secondary" full size="lg" onClick={() => auth('apple')} style={{ flex: 1 }}>
+          <WBtn variant="secondary" full size="lg" onClick={() => authWithProvider('apple')} style={{ flex: 1 }}>
             {loading === 'apple' ? '…' : <>{Icons.apple} <span>Apple</span></>}
           </WBtn>
         </div>
@@ -250,13 +442,30 @@ const linkBtnStyle: CSSProperties = {
 }
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
-function Sidebar({ screen, onNav }: { screen: Route; onNav: (r: Route) => void }) {
+function Sidebar({
+  screen, onNav, onSignOut, profile,
+}: {
+  screen: Route
+  onNav: (r: Route) => void
+  onSignOut: () => void
+  profile: AccountProfile | null
+}) {
   const items: { id: Route; label: string; icon: ReactNode }[] = [
     { id: 'search', label: 'Source', icon: Icons.search },
     { id: 'inventory', label: 'Inventory', icon: Icons.bag },
     { id: 'history', label: 'History', icon: Icons.history },
     { id: 'profit', label: 'Profit', icon: Icons.profit },
+    { id: 'settings', label: 'Settings', icon: Icons.profit },
   ]
+  const searchCount = profile?.searchCount ?? 0
+  const searchLimit = profile?.searchLimit ?? 10
+  const unlimitedSearches = profile?.unlimitedSearches ?? false
+  const usageWidth = unlimitedSearches ? 100 : Math.min(100, Math.round((searchCount / searchLimit) * 100))
+  const username = profile?.username ?? 'loading'
+  const email = profile?.email ?? ''
+  const initials = profile?.initials ?? 'T'
+  const plan = profile?.plan ?? 'Free'
+
   return (
     <aside style={{
       width: 232, flexShrink: 0, height: '100vh', position: 'sticky', top: 0,
@@ -307,15 +516,15 @@ function Sidebar({ screen, onNav }: { screen: Route; onNav: (r: Route) => void }
           <div style={{
             fontFamily: FONT_MONO, fontSize: 9, letterSpacing: 0.14,
             textTransform: 'uppercase', color: T.textFaint,
-          }}>Free tier</div>
+          }}>{plan} tier</div>
           <div style={{ fontSize: 12, color: T.text, marginTop: 4, lineHeight: 1.4 }}>
-            7 / 10 searches today
+            {unlimitedSearches ? `${searchCount} searches · unlimited` : `${searchCount} / ${searchLimit} searches`}
           </div>
           <div style={{
             height: 3, background: T.border, borderRadius: 999,
             marginTop: 8, overflow: 'hidden',
           }}>
-            <div style={{ height: '100%', width: '70%', background: A.hex, borderRadius: 999 }} />
+            <div style={{ height: '100%', width: `${usageWidth}%`, background: A.hex, borderRadius: 999 }} />
           </div>
         </div>
 
@@ -328,41 +537,134 @@ function Sidebar({ screen, onNav }: { screen: Route; onNav: (r: Route) => void }
             background: `linear-gradient(135deg, ${A.hex}, ${T.text})`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: T.bg, fontFamily: FONT_MONO, fontWeight: 800, fontSize: 12,
-          }}>R</div>
+          }}>{initials}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>resale.king</div>
-            <div style={{ fontSize: 10, color: T.textFaint, fontFamily: FONT_MONO }}>Pro · 14d trial</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{username}</div>
+            <div style={{
+              fontSize: 10, color: T.textFaint, fontFamily: FONT_MONO,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{email}</div>
           </div>
         </div>
+        <button onClick={onSignOut} style={{
+          width: '100%', marginTop: 10, height: 34,
+          borderRadius: 8, border: `1px solid ${T.border}`,
+          background: 'transparent', color: T.textMute,
+          fontFamily: FONT_BODY, fontSize: 12, fontWeight: 700,
+          cursor: 'pointer',
+        }}>Sign out</button>
       </div>
     </aside>
   )
 }
 
+function MobileNav({
+  screen, onNav, onSignOut,
+}: {
+  screen: Route
+  onNav: (r: Route) => void
+  onSignOut: () => void
+}) {
+  const items: { id: Route; label: string; icon: ReactNode }[] = [
+    { id: 'search', label: 'Source', icon: Icons.search },
+    { id: 'inventory', label: 'Inventory', icon: Icons.bag },
+    { id: 'history', label: 'History', icon: Icons.history },
+    { id: 'profit', label: 'Profit', icon: Icons.profit },
+    { id: 'settings', label: 'Settings', icon: Icons.profit },
+  ]
+
+  return (
+    <nav style={{
+      position: 'fixed',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 250,
+      display: 'grid',
+      gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+      gap: 2,
+      padding: '8px 8px calc(8px + env(safe-area-inset-bottom))',
+      background: T.surface,
+      borderTop: `1px solid ${T.border}`,
+      boxShadow: '0 -12px 36px rgba(0,0,0,0.32)',
+    }}>
+      {items.map(item => {
+        const active = screen === item.id
+        return (
+          <button key={item.id} onClick={() => onNav(item.id)} style={{
+            minWidth: 0,
+            height: 56,
+            border: 'none',
+            borderRadius: 10,
+            background: active ? T.surface2 : 'transparent',
+            color: active ? T.text : T.textMute,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 4,
+            fontFamily: FONT_BODY,
+            fontSize: 10,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}>
+            <span style={{ display: 'flex', color: active ? A.hex : T.textMute }}>{item.icon}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{item.label}</span>
+          </button>
+        )
+      })}
+      <button onClick={onSignOut} aria-label="Sign out" style={{
+        minWidth: 0,
+        height: 56,
+        border: 'none',
+        borderRadius: 10,
+        background: 'transparent',
+        color: T.textMute,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: FONT_BODY,
+        fontSize: 10,
+        fontWeight: 700,
+        cursor: 'pointer',
+      }}>Sign out</button>
+    </nav>
+  )
+}
+
 // ─── Source / Search ────────────────────────────────────────────────────────
-function WebSource({ onSearch }: { onSearch: (q: string) => void }) {
+function WebSource({ onSearch, isMobile }: { onSearch: (q: string) => void; isMobile: boolean }) {
   const [q, setQ] = useState('')
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '48px 56px 80px' }}>
+    <div style={{
+      flex: 1,
+      overflow: 'auto',
+      padding: isMobile ? '28px 16px 104px' : '48px 56px 80px',
+    }}>
       <div style={{ maxWidth: 920, margin: '0 auto' }}>
         <div style={{
           fontFamily: FONT_MONO, fontSize: 11, letterSpacing: 0.18,
           textTransform: 'uppercase', color: A.hex,
         }}>Source</div>
         <div style={{
-          fontFamily: display, fontSize: 72, lineHeight: 0.95,
-          letterSpacing: -0.02, color: T.text, marginTop: 14, fontWeight: 400,
+          fontFamily: display, fontSize: isMobile ? 46 : 72, lineHeight: 0.95,
+          letterSpacing: 0, color: T.text, marginTop: 14, fontWeight: 400,
         }}>
           What did you<br />
           <span style={{ fontStyle: 'italic', color: A.hex }}>find</span> today?
         </div>
 
         <form onSubmit={e => { e.preventDefault(); if (q.trim()) onSearch(q) }}
-          style={{ marginTop: 36, display: 'flex', gap: 10 }}>
+          style={{
+            marginTop: isMobile ? 28 : 36,
+            display: 'flex',
+            flexDirection: isMobile ? 'column' : 'row',
+            gap: 10,
+          }}>
           <div style={{
             flex: 1, display: 'flex', alignItems: 'center', gap: 12,
             background: T.surface, border: `1px solid ${T.border}`,
-            borderRadius: 14, padding: '0 18px', height: 64,
+            borderRadius: 14, padding: '0 18px', height: isMobile ? 56 : 64,
           }}>
             <span style={{ color: T.textMute, display: 'flex' }}>{Icons.search}</span>
             <input value={q} onChange={e => setQ(e.target.value)}
@@ -371,16 +673,21 @@ function WebSource({ onSearch }: { onSearch: (q: string) => void }) {
                 flex: 1, background: 'transparent', border: 'none', outline: 'none',
                 color: T.text, fontFamily: FONT_BODY, fontSize: 17, height: '100%',
               }} />
-            <span style={{
+            {!isMobile && <span style={{
               fontFamily: FONT_MONO, fontSize: 10, color: T.textFaint,
               letterSpacing: 0.1, padding: '3px 7px',
               border: `1px solid ${T.border}`, borderRadius: 6,
-            }}>⌘K</span>
+            }}>⌘K</span>}
           </div>
           <WBtn type="submit" size="lg" disabled={!q.trim()}>Run comps {Icons.arrow}</WBtn>
         </form>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20, marginTop: 40 }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr',
+          gap: 20,
+          marginTop: 40,
+        }}>
           <div>
             <div style={sectionLabel}>Trending</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -417,9 +724,13 @@ function WebSource({ onSearch }: { onSearch: (q: string) => void }) {
 
         <div style={{ marginTop: 40 }}>
           <div style={sectionLabel}>How it works</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
+            gap: 12,
+          }}>
             {[
-              { n: '01', t: 'Search', d: 'Real eBay sold listings, last 90 days. Outliers trimmed at 1.5× IQR.' },
+              { n: '01', t: 'Search', d: 'Run a sourcing search and save the result to your account history.' },
               { n: '02', t: 'Calculate', d: 'Enter your buy price. We model fees, shipping, and your target margin.' },
               { n: '03', t: 'BUY or SKIP', d: 'Get a clear verdict in under two seconds. Save winners to inventory.' },
             ].map(s => (
@@ -443,12 +754,13 @@ const sectionLabel: CSSProperties = {
 
 // ─── Item detail ────────────────────────────────────────────────────────────
 function WebItem({
-  query, item, onSave, onListing, onBack,
+  query, item, onSave, onListing, onBack, isMobile,
 }: {
   query: string; item: Item;
   onSave: (p: { item: Item; cost: number; est: number }) => void;
   onListing: (item: Item, sellPrice: number) => void;
   onBack: () => void;
+  isMobile: boolean;
 }) {
   const s = useMemo(() => stats(item.comps), [item])
   const [cost, setCost] = useState(20)
@@ -472,7 +784,7 @@ function WebItem({
   const verdictLabel = verdict === 'BUY' ? 'BUY' : verdict === 'SKIP' ? 'SKIP' : 'LOW CONF'
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '28px 40px 60px' }}>
+    <div style={pageStyle(isMobile)}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
         <button onClick={onBack} style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -488,11 +800,11 @@ function WebItem({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, marginBottom: 24 }}>
-        <Swatch a={item.swatch} b={item.swatch2} size={88} radius={16} />
+        <Swatch a={item.swatch} b={item.swatch2} size={isMobile ? 64 : 88} radius={16} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontFamily: display, fontSize: 38, lineHeight: 1.05,
-            fontWeight: 500, color: T.text, letterSpacing: -0.01,
+            fontFamily: display, fontSize: isMobile ? 30 : 38, lineHeight: 1.05,
+            fontWeight: 500, color: T.text, letterSpacing: 0,
           }}>{item.title}</div>
           <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
             <WPill kind="outline">{item.sub}</WPill>
@@ -504,11 +816,19 @@ function WebItem({
         </div>
       </div>
 
-      {phase === 'loading' ? <Skeleton /> : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: 20 }}>
+      {phase === 'loading' ? <Skeleton isMobile={isMobile} /> : (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.4fr) minmax(0, 1fr)',
+          gap: 20,
+        }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <WCard pad={22}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, 1fr)',
+                gap: 16,
+              }}>
                 <BigStat label="Median" value={`$${Math.round(s.median)}`} hi />
                 <BigStat label="Mean" value={`$${Math.round(s.mean)}`} />
                 <BigStat label="Range" value={`$${s.min}–$${s.max}`} />
@@ -518,7 +838,7 @@ function WebItem({
               <CompChart item={item} />
             </WCard>
 
-            <WCard pad={0}>
+            <WCard pad={0} style={{ overflowX: 'auto' }}>
               <div style={{
                 padding: '14px 18px', display: 'flex',
                 justifyContent: 'space-between', alignItems: 'center',
@@ -529,11 +849,12 @@ function WebItem({
                   textTransform: 'uppercase', color: T.text, fontWeight: 700,
                 }}>Recent sold · {item.comps.length}</div>
                 <div style={{ fontFamily: FONT_MONO, fontSize: 10, color: T.textFaint }}>
-                  via eBay · cached 4m ago
+                  seeded comps · saved to history
                 </div>
               </div>
               <div style={{
                 display: 'grid', gridTemplateColumns: '1fr 90px 90px 100px 90px',
+                minWidth: 620,
                 fontFamily: FONT_MONO, fontSize: 10, letterSpacing: 0.1,
                 textTransform: 'uppercase', color: T.textFaint,
                 padding: '10px 18px', borderBottom: `1px solid ${T.border}`,
@@ -547,6 +868,7 @@ function WebItem({
                 return (
                   <div key={i} style={{
                     display: 'grid', gridTemplateColumns: '1fr 90px 90px 100px 90px',
+                    minWidth: 620,
                     padding: '12px 18px', alignItems: 'center',
                     borderBottom: i < 9 ? `1px solid ${T.border}` : 'none',
                     fontFamily: FONT_BODY, fontSize: 13, color: tone,
@@ -570,8 +892,11 @@ function WebItem({
           </div>
 
           <div style={{
-            position: 'sticky', top: 0, alignSelf: 'flex-start',
+            position: isMobile ? 'static' : 'sticky',
+            top: 0,
+            alignSelf: 'flex-start',
             display: 'flex', flexDirection: 'column', gap: 16,
+            width: '100%',
           }}>
             <div style={{
               background: verdictColor, color: verdictInk,
@@ -784,10 +1109,14 @@ function CompChart({ item }: { item: Item }) {
   )
 }
 
-function Skeleton() {
+function Skeleton({ isMobile }: { isMobile: boolean }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 20 }}>
-      {[0, 1].map(c => (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1fr',
+      gap: 20,
+    }}>
+      {(isMobile ? [0] : [0, 1]).map(c => (
         <div key={c} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {[0, 1, 2].map(r => (
             <div key={r} style={{
@@ -810,11 +1139,12 @@ function Skeleton() {
 
 // ─── Inventory ──────────────────────────────────────────────────────────────
 function WebInventory({
-  items, onSearch, onStatusChange,
+  items, onSearch, onStatusChange, isMobile,
 }: {
   items: InventoryItem[]
   onSearch: () => void
   onStatusChange: (id: string, status: InventoryItem['status']) => void
+  isMobile: boolean
 }) {
   const [filter, setFilter] = useState<'all' | InventoryItem['status']>('all')
   const totalCost = items.reduce((s, x) => s + x.cost, 0)
@@ -826,19 +1156,16 @@ function WebInventory({
   const filtered = filter === 'all' ? items : items.filter(x => x.status === filter)
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '28px 40px 60px' }}>
-      <div style={{
-        display: 'flex', justifyContent: 'space-between',
-        alignItems: 'flex-end', marginBottom: 26,
-      }}>
+    <div style={pageStyle(isMobile)}>
+      <div style={pageHeaderStyle(isMobile)}>
         <div>
           <div style={{
             fontFamily: FONT_MONO, fontSize: 11, letterSpacing: 0.18,
             textTransform: 'uppercase', color: A.hex,
           }}>Inventory</div>
           <div style={{
-            fontFamily: display, fontSize: 48, lineHeight: 1.0,
-            fontWeight: 600, marginTop: 6, color: T.text, letterSpacing: -0.01,
+            ...pageTitleStyle(isMobile),
+            letterSpacing: 0,
           }}>
             {items.length} items ·{' '}
             <span style={{ fontStyle: 'italic', color: A.hex }}>${totalEst.toLocaleString()}</span>
@@ -847,10 +1174,7 @@ function WebInventory({
         <WBtn onClick={onSearch} size="lg">{Icons.plus} New source</WBtn>
       </div>
 
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: 14, marginBottom: 26,
-      }}>
+      <div style={kpiGridStyle(isMobile)}>
         <KPI label="Inventory value" value={`$${totalEst.toLocaleString()}`} sub={`${items.length} items`} hi />
         <KPI label="Total spend" value={`$${totalCost}`} sub="cost basis" />
         <KPI label="Pending profit" value={`$${pending.toFixed(0)}`}
@@ -860,11 +1184,15 @@ function WebInventory({
 
       <div style={{
         display: 'flex', justifyContent: 'space-between',
-        alignItems: 'center', marginBottom: 14,
+        alignItems: isMobile ? 'stretch' : 'center',
+        flexDirection: isMobile ? 'column' : 'row',
+        gap: isMobile ? 10 : 14,
+        marginBottom: 14,
       }}>
         <div style={{
           display: 'flex', gap: 6, padding: 4,
           background: T.surface, borderRadius: 10, border: `1px solid ${T.border}`,
+          overflowX: 'auto',
         }}>
           {tabs.map(t => (
             <button key={t} onClick={() => setFilter(t)} style={{
@@ -883,7 +1211,7 @@ function WebInventory({
         }}>Sorted: most recent</div>
       </div>
 
-      <WCard pad={0}>
+      <WCard pad={0} style={{ overflowX: 'auto' }}>
         <div style={invHeaderStyle}>
           <div></div>
           <div>Item</div>
@@ -899,6 +1227,7 @@ function WebInventory({
           return (
             <div key={it.id} style={{
               display: 'grid', gridTemplateColumns: '40px 2fr 90px 90px 110px 90px 90px',
+              minWidth: 760,
               padding: '14px 18px', alignItems: 'center',
               borderBottom: i < filtered.length - 1 ? `1px solid ${T.border}` : 'none',
               transition: 'background .12s',
@@ -964,6 +1293,7 @@ function WebInventory({
 
 const invHeaderStyle: CSSProperties = {
   display: 'grid', gridTemplateColumns: '40px 2fr 90px 90px 110px 90px 90px',
+  minWidth: 760,
   padding: '12px 18px', alignItems: 'center',
   fontFamily: FONT_MONO, fontSize: 10, letterSpacing: 0.1,
   textTransform: 'uppercase', color: T.textFaint,
@@ -1071,7 +1401,7 @@ function WebListing({
           </div>
           <WPill kind="accent">
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              {Icons.spark} Claude
+              {Icons.spark} AI draft
             </span>
           </WPill>
           <button onClick={onClose} style={{
@@ -1177,34 +1507,30 @@ function Block({
 
 // ─── History ────────────────────────────────────────────────────────────────
 function WebHistory({
-  searches, onOpen, onSearch,
+  searches, onOpen, onSearch, isMobile,
 }: {
   searches: SearchRecord[]
   onOpen: (query: string) => void
   onSearch: () => void
+  isMobile: boolean
 }) {
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '28px 40px 60px' }}>
-      <div style={{
-        display: 'flex', justifyContent: 'space-between',
-        alignItems: 'flex-end', marginBottom: 26,
-      }}>
+    <div style={pageStyle(isMobile)}>
+      <div style={pageHeaderStyle(isMobile)}>
         <div>
           <div style={{
             fontFamily: FONT_MONO, fontSize: 11, letterSpacing: 0.18,
             textTransform: 'uppercase', color: A.hex,
           }}>History</div>
-          <div style={{
-            fontFamily: display, fontSize: 48, lineHeight: 1,
-            fontWeight: 600, marginTop: 6, color: T.text,
-          }}>Recent sourcing runs</div>
+          <div style={pageTitleStyle(isMobile)}>Recent sourcing runs</div>
         </div>
         <WBtn onClick={onSearch} size="lg">{Icons.plus} New search</WBtn>
       </div>
 
-      <WCard pad={0}>
+      <WCard pad={0} style={{ overflowX: 'auto' }}>
         <div style={{
           display: 'grid', gridTemplateColumns: '1.8fr 1.5fr 90px 120px 110px',
+          minWidth: 720,
           padding: '12px 18px', alignItems: 'center',
           fontFamily: FONT_MONO, fontSize: 10, letterSpacing: 0.1,
           textTransform: 'uppercase', color: T.textFaint,
@@ -1216,6 +1542,7 @@ function WebHistory({
           <button key={run.id} onClick={() => onOpen(run.query)} style={{
             width: '100%', display: 'grid',
             gridTemplateColumns: '1.8fr 1.5fr 90px 120px 110px',
+            minWidth: 720,
             padding: '14px 18px', alignItems: 'center',
             border: 'none',
             borderBottom: i < searches.length - 1 ? `1px solid ${T.border}` : 'none',
@@ -1251,7 +1578,13 @@ function WebHistory({
 }
 
 // ─── Profit ─────────────────────────────────────────────────────────────────
-function WebProfit({ items, onInventory }: { items: InventoryItem[]; onInventory: () => void }) {
+function WebProfit({
+  items, onInventory, isMobile,
+}: {
+  items: InventoryItem[]
+  onInventory: () => void
+  isMobile: boolean
+}) {
   const totalCost = items.reduce((sum, item) => sum + item.cost, 0)
   const totalValue = items.reduce((sum, item) => sum + item.est, 0)
   const grossProfit = totalValue - totalCost
@@ -1263,32 +1596,30 @@ function WebProfit({ items, onInventory }: { items: InventoryItem[]; onInventory
   const topItems = [...items].sort((a, b) => (b.est - b.cost) - (a.est - a.cost)).slice(0, 5)
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '28px 40px 60px' }}>
-      <div style={{
-        display: 'flex', justifyContent: 'space-between',
-        alignItems: 'flex-end', marginBottom: 26,
-      }}>
+    <div style={pageStyle(isMobile)}>
+      <div style={pageHeaderStyle(isMobile)}>
         <div>
           <div style={{
             fontFamily: FONT_MONO, fontSize: 11, letterSpacing: 0.18,
             textTransform: 'uppercase', color: A.hex,
           }}>Profit</div>
-          <div style={{
-            fontFamily: display, fontSize: 48, lineHeight: 1,
-            fontWeight: 600, marginTop: 6, color: T.text,
-          }}>Resale performance</div>
+          <div style={pageTitleStyle(isMobile)}>Resale performance</div>
         </div>
         <WBtn onClick={onInventory} size="lg">Manage inventory {Icons.arrow}</WBtn>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 26 }}>
+      <div style={kpiGridStyle(isMobile)}>
         <KPI label="Projected value" value={`$${totalValue.toLocaleString()}`} sub={`${items.length} items`} hi />
         <KPI label="Cost basis" value={`$${totalCost.toLocaleString()}`} sub="all inventory" />
         <KPI label="Projected ROI" value={`${roi}%`} sub="before final costs" />
         <KPI label="Realized net" value={`$${realized.toFixed(0)}`} sub={`${soldItems.length} sold`} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 16 }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : '1.1fr 1fr',
+        gap: 16,
+      }}>
         <WCard>
           <div style={sectionLabel}>Profit pipeline</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1328,7 +1659,8 @@ function WebProfit({ items, onInventory }: { items: InventoryItem[]; onInventory
             const profit = item.est - item.cost
             return (
               <div key={item.id} style={{
-                display: 'grid', gridTemplateColumns: '38px 1fr 90px',
+                display: 'grid',
+                gridTemplateColumns: isMobile ? '34px minmax(0, 1fr) 72px' : '38px 1fr 90px',
                 gap: 12, alignItems: 'center', padding: '14px 18px',
                 borderBottom: i < topItems.length - 1 ? `1px solid ${T.border}` : 'none',
               }}>
@@ -1352,92 +1684,398 @@ function WebProfit({ items, onInventory }: { items: InventoryItem[]; onInventory
   )
 }
 
+function WebSettings({
+  profile, email, onSaveUsername, onSaveEmail, onResetPassword, isMobile,
+}: {
+  profile: AccountProfile | null
+  email: string
+  onSaveUsername: (username: string) => Promise<void>
+  onSaveEmail: (email: string) => Promise<void>
+  onResetPassword: () => Promise<void>
+  isMobile: boolean
+}) {
+  const [username, setUsername] = useState(profile?.username ?? '')
+  const [nextEmail, setNextEmail] = useState(email)
+  const [saving, setSaving] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setUsername(profile?.username ?? '')
+  }, [profile?.username])
+
+  useEffect(() => {
+    setNextEmail(email)
+  }, [email])
+
+  const run = async (label: string, task: () => Promise<void>, success: string) => {
+    setSaving(label)
+    setMessage(null)
+    setError(null)
+
+    try {
+      await task()
+      setMessage(success)
+    } catch (settingsError) {
+      setError(settingsError instanceof Error ? settingsError.message : 'Could not update settings')
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  return (
+    <div style={pageStyle(isMobile)}>
+      <div style={{ marginBottom: 26 }}>
+        <div style={{
+          fontFamily: FONT_MONO, fontSize: 11, letterSpacing: 0.18,
+          textTransform: 'uppercase', color: A.hex,
+        }}>Settings</div>
+        <div style={pageTitleStyle(isMobile)}>Account settings</div>
+      </div>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : '0.8fr 1.2fr',
+        gap: 16,
+      }}>
+        <WCard>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{
+              width: 54, height: 54, borderRadius: 14,
+              background: `linear-gradient(135deg, ${A.hex}, ${T.text})`,
+              color: T.bg, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: FONT_MONO, fontSize: 20, fontWeight: 900,
+            }}>{profile?.initials ?? 'T'}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{profile?.username ?? 'loading'}</div>
+              <div style={{
+                fontFamily: FONT_MONO, fontSize: 11, color: T.textFaint,
+                marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>{email}</div>
+            </div>
+          </div>
+
+          <div style={{ height: 1, background: T.border, margin: '18px 0' }} />
+          <Line label="Plan" value={profile?.plan ?? 'Free'} />
+          <Line
+            label="Searches"
+            value={profile?.unlimitedSearches
+              ? `${profile.searchCount} · unlimited`
+              : `${profile?.searchCount ?? 0} / ${profile?.searchLimit ?? 10}`}
+            last
+          />
+        </WCard>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <WCard>
+            <div style={settingsTitle}>Profile</div>
+            <label style={settingsLabel}>Username</label>
+            <div style={{
+              display: 'flex',
+              flexDirection: isMobile ? 'column' : 'row',
+              gap: 10,
+              marginTop: 8,
+            }}>
+              <input
+                value={username}
+                onChange={event => setUsername(event.target.value.toLowerCase())}
+                pattern="[a-z0-9_]{3,24}"
+                style={settingsInput}
+              />
+              <WBtn
+                disabled={saving === 'username' || !username || username === profile?.username}
+                onClick={() => run('username', () => onSaveUsername(username), 'Username updated.')}
+              >
+                Save
+              </WBtn>
+            </div>
+          </WCard>
+
+          <WCard>
+            <div style={settingsTitle}>Login</div>
+            <label style={settingsLabel}>Email address</label>
+            <div style={{
+              display: 'flex',
+              flexDirection: isMobile ? 'column' : 'row',
+              gap: 10,
+              marginTop: 8,
+            }}>
+              <input
+                value={nextEmail}
+                onChange={event => setNextEmail(event.target.value)}
+                type="email"
+                style={settingsInput}
+              />
+              <WBtn
+                disabled={saving === 'email' || !nextEmail || nextEmail === email}
+                onClick={() => run('email', () => onSaveEmail(nextEmail), 'Check your inbox to confirm the email change.')}
+              >
+                Update
+              </WBtn>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <WBtn
+                variant="secondary"
+                disabled={saving === 'password'}
+                onClick={() => run('password', onResetPassword, 'Password reset email sent.')}
+              >
+                Send password reset
+              </WBtn>
+            </div>
+          </WCard>
+
+          {(message || error) && (
+            <div style={{
+              padding: '12px 14px', borderRadius: 10,
+              background: error ? 'rgba(255,59,47,0.12)' : T.surface,
+              border: `1px solid ${error ? T.skip : T.border}`,
+              color: error ? '#ff9a92' : T.text,
+              fontSize: 13,
+            }}>{error ?? message}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const settingsTitle: CSSProperties = {
+  fontFamily: FONT_MONO,
+  fontSize: 11,
+  letterSpacing: 0.1,
+  textTransform: 'uppercase',
+  fontWeight: 700,
+  color: T.text,
+  marginBottom: 14,
+}
+
+const settingsLabel: CSSProperties = {
+  display: 'block',
+  fontSize: 12,
+  color: T.textMute,
+  fontWeight: 700,
+}
+
+const settingsInput: CSSProperties = {
+  flex: 1,
+  height: 40,
+  borderRadius: 10,
+  background: T.surface2,
+  border: `1px solid ${T.border}`,
+  color: T.text,
+  padding: '0 12px',
+  fontFamily: FONT_BODY,
+  fontSize: 14,
+  outline: 'none',
+}
+
 // ─── Root ───────────────────────────────────────────────────────────────────
 export function ThriftIQWeb() {
-  const [authed, setAuthed] = useState(false)
+  const supabase = useMemo(() => createSupabaseBrowserClient(), [])
+  const isMobile = useIsMobile()
+  const [session, setSession] = useState<Session | null>(null)
+  const [authReady, setAuthReady] = useState(false)
   const [route, setRoute] = useState<Route>('search')
   const [activeItem, setActiveItem] = useState<Item | null>(null)
   const [activeQuery, setActiveQuery] = useState('')
-  const [inventory, setInventory] = useState<InventoryItem[]>(INITIAL_INVENTORY)
+  const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [searches, setSearches] = useState<SearchRecord[]>([])
+  const [profile, setProfile] = useState<AccountProfile | null>(null)
   const [listingFor, setListingFor] = useState<{ item: Item; sellPrice: number } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
   useEffect(() => {
-    const savedAuth = window.localStorage.getItem('thriftiq.authed')
-    const savedInventory = window.localStorage.getItem('thriftiq.inventory')
-    const savedSearches = window.localStorage.getItem('thriftiq.searches')
+    let mounted = true
 
-    if (savedAuth === 'true') setAuthed(true)
-    if (savedInventory) setInventory(JSON.parse(savedInventory) as InventoryItem[])
-    if (savedSearches) setSearches(JSON.parse(savedSearches) as SearchRecord[])
-  }, [])
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return
+      setSession(data.session)
+      setAuthReady(true)
+    })
 
-  useEffect(() => {
-    window.localStorage.setItem('thriftiq.inventory', JSON.stringify(inventory))
-  }, [inventory])
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+      setAuthReady(true)
+      const metadataUsername = nextSession?.user.user_metadata.username
 
-  useEffect(() => {
-    window.localStorage.setItem('thriftiq.searches', JSON.stringify(searches))
-  }, [searches])
+      if (nextSession) {
+        void syncSupabaseProfile(
+          nextSession.access_token,
+          typeof metadataUsername === 'string' ? metadataUsername : undefined,
+        ).catch(() => undefined)
+      }
+    })
 
-  useEffect(() => {
-    window.localStorage.setItem('thriftiq.authed', authed ? 'true' : 'false')
-  }, [authed])
-
-  if (!authed) return <WebSignIn onAuth={() => setAuthed(true)} />
+    return () => {
+      mounted = false
+      listener.subscription.unsubscribe()
+    }
+  }, [supabase])
 
   const flashToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2000) }
 
-  const handleSearch = (q: string) => {
-    const found = findItem(q)
-    const s = stats(found.comps)
-    const projected = calcProfit({
-      sellPrice: Math.round(s.median),
-      cost: Math.max(1, Math.round(s.median * 0.2)),
-      shipping: 12,
-    })
-    const verdict: SearchRecord['verdict'] =
-      s.confidence === 'Low' ? 'WATCH' : projected.margin >= BUY_THRESHOLD ? 'BUY' : 'SKIP'
+  const apiFetch = async <T,>(path: string, init: RequestInit = {}) => {
+    if (!session) {
+      throw new Error('Not signed in')
+    }
 
-    setActiveQuery(q)
-    setActiveItem(found)
-    setSearches(prev => [{
-      id: 'search-' + Date.now(),
-      query: q,
-      title: found.title,
-      median: Math.round(s.median),
-      confidence: s.confidence,
-      verdict,
-      searchedAt: 'just now',
-    }, ...prev].slice(0, 20))
-    setRoute('item')
+    const response = await fetch(path, {
+      ...init,
+      headers: {
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init.headers,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    })
+    const body = await response.json().catch(() => ({})) as T & { error?: string }
+
+    if (!response.ok) {
+      throw new Error(body.error ?? 'Request failed')
+    }
+
+    return body
   }
-  const handleSave = ({ item, cost, est }: { item: Item; cost: number; est: number }) => {
-    setInventory(prev => [{
-      id: 'inv-' + Date.now(),
-      title: item.title, cost, est, status: 'sourced',
-      swatch: item.swatch, swatch2: item.swatch2, date: 'just now',
-    }, ...prev])
-    flashToast(`Saved · $${cost} → $${est}`)
+
+  const refreshBackendData = async () => {
+    const [inventoryResponse, searchesResponse, profileResponse] = await Promise.all([
+      apiFetch<{ items: InventoryItem[] }>('/api/inventory'),
+      apiFetch<{ searches: SearchRecord[] }>('/api/searches'),
+      apiFetch<{ user: AccountProfile }>('/api/me'),
+    ])
+
+    setInventory(inventoryResponse.items)
+    setSearches(searchesResponse.searches)
+    setProfile(profileResponse.user)
   }
-  const handleStatusChange = (id: string, status: InventoryItem['status']) => {
+
+  useEffect(() => {
+    if (!session) {
+      return
+    }
+
+    void refreshBackendData().catch(error => {
+      flashToast(error instanceof Error ? error.message : 'Could not load data')
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.access_token])
+
+  if (!authReady) return null
+
+  if (!session) return <WebSignIn onAuth={() => setAuthReady(true)} />
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    setSession(null)
+    setProfile(null)
+    setInventory([])
+    setSearches([])
+    setRoute('search')
+  }
+
+  const handleSearch = async (q: string) => {
+    try {
+      const response = await apiFetch<{ item: Item; search: SearchRecord }>('/api/searches', {
+        method: 'POST',
+        body: JSON.stringify({ query: q }),
+      })
+
+      setActiveQuery(q)
+      setActiveItem(response.item)
+      setSearches(prev => [response.search, ...prev.filter(item => item.id !== response.search.id)].slice(0, 20))
+      setProfile(prev => prev ? { ...prev, searchCount: prev.searchCount + 1 } : prev)
+      setRoute('item')
+    } catch (error) {
+      flashToast(error instanceof Error ? error.message : 'Search failed')
+    }
+  }
+  const handleSave = async ({ item, cost, est }: { item: Item; cost: number; est: number }) => {
+    try {
+      const response = await apiFetch<{ item: InventoryItem }>('/api/inventory', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: item.title,
+          cost,
+          est,
+          swatch: item.swatch,
+          swatch2: item.swatch2,
+        }),
+      })
+      setInventory(prev => [response.item, ...prev])
+      flashToast(`Saved · $${cost} → $${est}`)
+    } catch (error) {
+      flashToast(error instanceof Error ? error.message : 'Could not save item')
+    }
+  }
+  const handleStatusChange = async (id: string, status: InventoryItem['status']) => {
+    const previous = inventory
     setInventory(prev => prev.map(item => item.id === id ? { ...item, status } : item))
-    flashToast(`Updated status · ${status}`)
+
+    try {
+      await apiFetch('/api/inventory/' + id, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      })
+      flashToast(`Updated status · ${status}`)
+    } catch (error) {
+      setInventory(previous)
+      flashToast(error instanceof Error ? error.message : 'Could not update status')
+    }
+  }
+
+  const handleSaveUsername = async (username: string) => {
+    const response = await apiFetch<{ user: AccountProfile }>('/api/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ username }),
+    })
+
+    setProfile(prev => ({
+      ...response.user,
+      searchCount: prev?.searchCount ?? response.user.searchCount,
+      searchLimit: prev?.searchLimit ?? response.user.searchLimit,
+    }))
+  }
+
+  const handleSaveEmail = async (email: string) => {
+    const { error } = await supabase.auth.updateUser(
+      { email },
+      { emailRedirectTo: window.location.origin },
+    )
+
+    if (error) {
+      throw new Error(error.message)
+    }
+  }
+
+  const handleResetPassword = async () => {
+    const targetEmail = session.user.email
+
+    if (!targetEmail) {
+      throw new Error('No email is attached to this account.')
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+      redirectTo: window.location.origin,
+    })
+
+    if (error) {
+      throw new Error(error.message)
+    }
   }
 
   let content: ReactNode
-  if (route === 'search') content = <WebSource onSearch={handleSearch} />
+  if (route === 'search') content = <WebSource onSearch={handleSearch} isMobile={isMobile} />
   else if (route === 'item' && activeItem) content = <WebItem
     query={activeQuery} item={activeItem}
     onSave={handleSave}
     onListing={(item, sp) => setListingFor({ item, sellPrice: sp })}
-    onBack={() => setRoute('search')} />
+    onBack={() => setRoute('search')}
+    isMobile={isMobile} />
   else if (route === 'inventory') content = (
     <WebInventory
       items={inventory}
       onSearch={() => setRoute('search')}
       onStatusChange={handleStatusChange}
+      isMobile={isMobile}
     />
   )
   else if (route === 'history') content = (
@@ -1445,16 +2083,33 @@ export function ThriftIQWeb() {
       searches={searches}
       onOpen={handleSearch}
       onSearch={() => setRoute('search')}
+      isMobile={isMobile}
     />
   )
-  else content = <WebProfit items={inventory} onInventory={() => setRoute('inventory')} />
+  else if (route === 'settings') content = (
+    <WebSettings
+      profile={profile}
+      email={session.user.email ?? profile?.email ?? ''}
+      onSaveUsername={handleSaveUsername}
+      onSaveEmail={handleSaveEmail}
+      onResetPassword={handleResetPassword}
+      isMobile={isMobile}
+    />
+  )
+  else content = <WebProfit items={inventory} onInventory={() => setRoute('inventory')} isMobile={isMobile} />
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: T.bg, color: T.text }}>
-      <Sidebar screen={route} onNav={setRoute} />
+    <div style={{
+      display: 'flex',
+      minHeight: '100vh',
+      background: T.bg,
+      color: T.text,
+    }}>
+      {!isMobile && <Sidebar screen={route} onNav={setRoute} onSignOut={handleSignOut} profile={profile} />}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {content}
       </main>
+      {isMobile && <MobileNav screen={route} onNav={setRoute} onSignOut={handleSignOut} />}
 
       {listingFor && <WebListing
         item={listingFor.item} sellPrice={listingFor.sellPrice}

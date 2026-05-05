@@ -164,9 +164,3 @@ export type InventoryItem = {
   id: string; title: string; cost: number; est: number;
   status: 'sourced' | 'listed' | 'sold'; swatch: string; swatch2: string; date: string
 }
-
-export const INITIAL_INVENTORY: InventoryItem[] = [
-  { id: 'inv-1', title: 'Vintage Polo Bear Sweater', cost: 14, est: 95, status: 'sourced', swatch: '#1F3A6B', swatch2: '#A82F2A', date: '2d ago' },
-  { id: 'inv-2', title: 'Nike ACG Fleece Pullover', cost: 22, est: 145, status: 'listed', swatch: '#2C3A1F', swatch2: '#C5FF3A', date: '5d ago' },
-  { id: 'inv-3', title: 'Stüssy World Tour Tee', cost: 8, est: 92, status: 'sold', swatch: '#000', swatch2: '#C5FF3A', date: '1w ago' },
-]

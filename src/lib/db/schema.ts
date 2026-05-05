@@ -20,8 +20,12 @@ export const recommendation = pgEnum('recommendation', ['buy', 'skip', 'watch'])
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  clerkUserId: text('clerk_user_id').notNull().unique(),
+  supabaseAuthId: uuid('supabase_auth_id').notNull().unique(),
   email: text('email').notNull(),
+  username: text('username').notNull().unique(),
+  plan: text('plan').notNull().default('Free'),
+  searchLimit: integer('search_limit').notNull().default(10),
+  unlimitedSearches: integer('unlimited_searches').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -65,6 +69,8 @@ export const inventoryItems = pgTable('inventory_items', {
   recommendation: recommendation('recommendation').notNull().default('watch'),
   status: inventoryStatus('status').notNull().default('sourced'),
   receiptImagePath: text('receipt_image_path'),
+  swatch: text('swatch').notNull().default('#3A3A3A'),
+  swatch2: text('swatch2').notNull().default('#1A1A1A'),
   notes: text('notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

@@ -1,6 +1,5 @@
 'use client'
 
-import { ClerkProvider } from '@clerk/nextjs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactNode, useState } from 'react'
 import { TamaguiProvider } from 'tamagui'
@@ -23,15 +22,9 @@ export function AppProviders({ children }: AppProvidersProps) {
       }),
   )
 
-  const app = (
+  return (
     <TamaguiProvider config={config} defaultTheme="light">
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </TamaguiProvider>
   )
-
-  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-    return app
-  }
-
-  return <ClerkProvider>{app}</ClerkProvider>
 }
