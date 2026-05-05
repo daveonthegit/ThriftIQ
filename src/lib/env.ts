@@ -11,10 +11,15 @@ const appEnvironmentSchema = z.object({
 
 const productionEnvironmentSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url(),
-  DATABASE_URL: z.string().min(1),
+  DATABASE_URL: z.string().min(1).optional(),
+  POSTGRES_URL: z.string().min(1).optional(),
+  POSTGRES_PRISMA_URL: z.string().min(1).optional(),
+  SUPABASE_DB_URL: z.string().min(1).optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
-  SUPABASE_SECRET_KEY: z.string().min(1),
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1).optional(),
+  SUPABASE_SECRET_KEY: z.string().min(1).optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().min(1),
   UPSTASH_REDIS_REST_URL: z.string().url(),
   UPSTASH_REDIS_REST_TOKEN: z.string().min(1),
@@ -22,7 +27,25 @@ const productionEnvironmentSchema = z.object({
   EBAY_CLIENT_ID: z.string().min(1),
   EBAY_CLIENT_SECRET: z.string().min(1),
   EBAY_ENVIRONMENT: ebayEnvironmentSchema,
-})
+}).refine(
+  value => Boolean(value.DATABASE_URL || value.POSTGRES_URL || value.POSTGRES_PRISMA_URL || value.SUPABASE_DB_URL),
+  {
+    message: 'One database connection URL is required.',
+    path: ['DATABASE_URL'],
+  },
+).refine(
+  value => Boolean(value.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || value.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+  {
+    message: 'One public Supabase browser key is required.',
+    path: ['NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'],
+  },
+).refine(
+  value => Boolean(value.SUPABASE_SECRET_KEY || value.SUPABASE_SERVICE_ROLE_KEY),
+  {
+    message: 'One Supabase server key is required.',
+    path: ['SUPABASE_SECRET_KEY'],
+  },
+)
 
 export type EbayEnvironment = z.infer<typeof ebayEnvironmentSchema>
 

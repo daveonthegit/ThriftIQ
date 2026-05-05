@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { databaseUrlSource, isDatabaseConfigured } from '@/lib/db/client'
 import { getAppEnvironment, getProductionEnvironmentReadiness } from '@/lib/env'
 
 export function GET() {
@@ -12,6 +13,8 @@ export function GET() {
       appUrl: environment.appUrl,
       ebay: environment.ebayEnvironment,
       node: process.env.NODE_ENV ?? 'development',
+      databaseConfigured: isDatabaseConfigured,
+      databaseUrlSource,
     },
     productionReady: readiness.ready,
     missingProductionEnv: readiness.missing,

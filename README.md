@@ -163,6 +163,23 @@ postgresql://postgres.<project-ref>:<encoded-password>@aws-...pooler.supabase.co
 
 If username login fails but email login starts working, check `DATABASE_URL` first. Username login resolves `users.username` through Postgres, while plain email login can reach Supabase Auth before app account data is loaded.
 
+If you connected Supabase through the Vercel integration, Vercel may provide the database URL as `POSTGRES_URL` or `POSTGRES_PRISMA_URL` instead of `DATABASE_URL`. The app supports those names too and prefers `POSTGRES_URL` when present because the integration uses pooled URLs. If a stale `DATABASE_URL` is still present and points to `db.<project-ref>.supabase.co`, delete it or replace it with the pooler URL to avoid confusion.
+
+The integration may also provide public and server Supabase keys under its default names:
+
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+The app supports those names as fallbacks for `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`.
+
+You can check which variable the deployed app is using from:
+
+```text
+/api/health
+```
+
+The response includes `environment.databaseUrlSource` without exposing the secret value.
+
 You can also create or verify the private `receipts` bucket from the repo:
 
 ```powershell
