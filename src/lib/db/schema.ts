@@ -6,6 +6,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
 
@@ -53,6 +54,36 @@ export const comps = pgTable('comps', {
   soldAt: timestamp('sold_at', { withTimezone: true }),
   itemUrl: text('item_url'),
   imageUrl: text('image_url'),
+})
+
+export const soldCompCaches = pgTable('sold_comp_caches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  normalizedQuery: text('normalized_query').notNull(),
+  query: text('query').notNull(),
+  marketplace: text('marketplace').notNull().default('ebay'),
+  source: text('source').notNull().default('apify-ebay-sold-listings'),
+  rawResponse: jsonb('raw_response'),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  newestSoldAt: timestamp('newest_sold_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, table => ({
+  normalizedQueryUnique: uniqueIndex('sold_comp_caches_normalized_query_unique').on(table.normalizedQuery),
+}))
+
+export const soldCompCacheItems = pgTable('sold_comp_cache_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  cacheId: uuid('cache_id')
+    .notNull()
+    .references(() => soldCompCaches.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  marketplace: text('marketplace').notNull().default('ebay'),
+  soldPrice: numeric('sold_price', { precision: 10, scale: 2 }).notNull(),
+  shippingPrice: numeric('shipping_price', { precision: 10, scale: 2 }),
+  soldAt: timestamp('sold_at', { withTimezone: true }),
+  itemUrl: text('item_url'),
+  condition: text('condition'),
+  size: text('size'),
 })
 
 export const inventoryItems = pgTable('inventory_items', {

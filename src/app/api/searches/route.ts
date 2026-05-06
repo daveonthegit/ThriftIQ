@@ -8,12 +8,17 @@ import { comps, searches } from '@/lib/db/schema'
 import { calcProfit, findItem, stats } from '@/components/thriftiq/data'
 import { searchEntitlementFor } from '@/lib/entitlements'
 import { fetchEbaySoldListings } from '@/lib/apify/ebay-sold-listings'
+import { getCachedEbaySoldListings, storeEbaySoldListings } from '@/lib/apify/sold-comps-cache'
 
 const BUY_THRESHOLD = 50
 
 const searchSchema = z.object({
   query: z.string().trim().min(1),
 })
+
+function cacheStatusFor(result: Awaited<ReturnType<typeof getCachedEbaySoldListings>> | Awaited<ReturnType<typeof fetchEbaySoldListings>>) {
+  return result && 'cacheStatus' in result ? result.cacheStatus : undefined
+}
 
 function mapSearch(row: typeof searches.$inferSelect) {
   const raw = row.rawResponse as {
@@ -96,9 +101,17 @@ export async function POST(request: Request) {
       }
     }
 
-    const apifyResult = await fetchEbaySoldListings(parsed.data.query).catch(error => {
-      console.error('Apify eBay sold listings failed; falling back to seed comps.', error)
-      return null
+    const cachedResult = await getCachedEbaySoldListings(parsed.data.query)
+    const apifyResult = cachedResult ?? await fetchEbaySoldListings(parsed.data.query).then(async result => {
+      if (result) {
+        await storeEbaySoldListings(parsed.data.query, result)
+        return result
+      }
+
+      return getCachedEbaySoldListings(parsed.data.query, { allowStale: true })
+    }).catch(async error => {
+      console.error('Apify eBay sold listings failed; falling back to cached or seed comps.', error)
+      return getCachedEbaySoldListings(parsed.data.query, { allowStale: true })
     })
     const item = apifyResult?.item ?? findItem(parsed.data.query)
     const itemStats = stats(item.comps)
@@ -110,12 +123,14 @@ export async function POST(request: Request) {
     const verdict =
       itemStats.confidence === 'Low' ? 'WATCH' : projected.margin >= BUY_THRESHOLD ? 'BUY' : 'SKIP'
 
+    const cacheStatus = cacheStatusFor(apifyResult)
     const rawResponse = {
       title: item.title,
       median: Math.round(itemStats.median),
       confidence: itemStats.confidence,
       verdict,
-      source: apifyResult ? 'apify-ebay-sold-listings' : 'seed-comps',
+      source: cacheStatus ? 'apify-ebay-sold-listings-cache' : apifyResult ? 'apify-ebay-sold-listings' : 'seed-comps',
+      cacheStatus,
       compCount: item.comps.length,
     }
 

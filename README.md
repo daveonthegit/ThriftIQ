@@ -276,10 +276,13 @@ npm run user:revoke-unlimited -- your@email.com
 
 Searches use the Apify `caffein.dev/ebay-sold-listings` actor when `APIFY_TOKEN` is configured. It requests up to 20 sold listings from the last 15 days. Without `APIFY_TOKEN`, the app falls back to seeded demo comps so local UI work still runs.
 
+Sold comp results are cached by normalized query. Fresh cache hits skip Apify; stale cache entries are refreshed, and if Apify is unavailable the stale cache is used before falling back to seeded comps. The default cache freshness window is 6 hours:
+
 Add this locally and in Vercel:
 
 ```text
 APIFY_TOKEN=your_apify_token
+APIFY_CACHE_TTL_HOURS=6
 ```
 
 The Codex MCP server for Apify uses the same `APIFY_TOKEN` environment variable.

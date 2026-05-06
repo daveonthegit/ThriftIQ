@@ -43,6 +43,13 @@
       "when": 1778002434872,
       "tag": "0005_database_entitlements",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778028000000,
+      "tag": "0006_sold_comps_cache",
+      "breakpoints": true
     }
   ]
 }
