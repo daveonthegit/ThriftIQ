@@ -36,6 +36,11 @@ type SearchRecord = {
   searchedAt: string
 }
 
+type TrendingSearch = {
+  query: string
+  count: number
+}
+
 type AccountProfile = {
   id: string
   email: string
@@ -639,12 +644,14 @@ function MobileNav({
 
 // ─── Source / Search ────────────────────────────────────────────────────────
 function WebSource({
-  onSearch, onOpenSearch, isMobile, recentSearches, searchingQuery, openingSearchId, cooldownQuery,
+  onSearch, onOpenSearch, isMobile, recentSearches, trendingSearches,
+  searchingQuery, openingSearchId, cooldownQuery,
 }: {
   onSearch: (q: string) => void
   onOpenSearch: (id: string) => void
   isMobile: boolean
   recentSearches: SearchRecord[]
+  trendingSearches: TrendingSearch[]
   searchingQuery: string | null
   openingSearchId: string | null
   cooldownQuery: string | null
@@ -656,6 +663,9 @@ function WebSource({
   const recentQueries = recentSearches
     .filter((search, index, all) => all.findIndex(item => item.query.toLowerCase() === search.query.toLowerCase()) === index)
     .slice(0, 5)
+  const trending = trendingSearches.length
+    ? trendingSearches
+    : TRENDING.map(query => ({ query, count: 0 }))
 
   return (
     <div style={{
@@ -740,14 +750,21 @@ function WebSource({
           <div>
             <div style={sectionLabel}>Trending</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {TRENDING.map(t => (
-                <button key={t} onClick={() => onSearch(t)} disabled={isSearching} style={{
+              {trending.map(t => (
+                <button key={t.query} onClick={() => onSearch(t.query)} disabled={isSearching} style={{
                   background: T.surface, border: `1px solid ${T.border}`,
                   color: T.text, padding: '10px 14px', borderRadius: 999,
                   fontFamily: FONT_BODY, fontSize: 13, fontWeight: 500,
                   cursor: isSearching ? 'not-allowed' : 'pointer',
                   opacity: isSearching ? 0.45 : 1,
-                }}>{t}</button>
+                }}>
+                  {t.query}
+                  {t.count > 0 && (
+                    <span style={{ marginLeft: 7, color: T.textFaint, fontFamily: FONT_MONO, fontSize: 10 }}>
+                      {t.count}
+                    </span>
+                  )}
+                </button>
               ))}
             </div>
           </div>
@@ -2036,6 +2053,7 @@ export function ThriftIQWeb() {
   const [activeQuery, setActiveQuery] = useState('')
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [searches, setSearches] = useState<SearchRecord[]>([])
+  const [trendingSearches, setTrendingSearches] = useState<TrendingSearch[]>([])
   const [profile, setProfile] = useState<AccountProfile | null>(null)
   const [listingFor, setListingFor] = useState<{ item: Item; sellPrice: number } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -2098,15 +2116,17 @@ export function ThriftIQWeb() {
   }
 
   const refreshBackendData = async () => {
-    const [inventoryResponse, searchesResponse, profileResponse] = await Promise.all([
+    const [inventoryResponse, searchesResponse, profileResponse, trendingResponse] = await Promise.all([
       apiFetch<{ items: InventoryItem[] }>('/api/inventory'),
       apiFetch<{ searches: SearchRecord[] }>('/api/searches'),
       apiFetch<{ user: AccountProfile }>('/api/me'),
+      apiFetch<{ trending: TrendingSearch[] }>('/api/searches/trending').catch(() => ({ trending: [] })),
     ])
 
     setInventory(inventoryResponse.items)
     setSearches(searchesResponse.searches)
     setProfile(profileResponse.user)
+    setTrendingSearches(trendingResponse.trending)
   }
 
   useEffect(() => {
@@ -2136,6 +2156,7 @@ export function ThriftIQWeb() {
     setProfile(null)
     setInventory([])
     setSearches([])
+    setTrendingSearches([])
     setRoute('search')
   }
 
@@ -2179,6 +2200,9 @@ export function ThriftIQWeb() {
       setActiveQuery(query)
       setActiveItem(response.item)
       setSearches(prev => [response.search, ...prev.filter(item => item.id !== response.search.id)].slice(0, 20))
+      void apiFetch<{ trending: TrendingSearch[] }>('/api/searches/trending')
+        .then(next => setTrendingSearches(next.trending))
+        .catch(() => undefined)
       setProfile(prev => prev ? { ...prev, searchCount: prev.searchCount + 1 } : prev)
       setRoute('item')
     } catch (error) {
@@ -2288,6 +2312,7 @@ export function ThriftIQWeb() {
       onOpenSearch={handleOpenSearch}
       isMobile={isMobile}
       recentSearches={searches}
+      trendingSearches={trendingSearches}
       searchingQuery={searchingQuery}
       openingSearchId={openingSearchId}
       cooldownQuery={searchCooldown && Date.now() < searchCooldown.until ? searchCooldown.query : null}
