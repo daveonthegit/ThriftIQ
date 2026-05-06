@@ -1102,6 +1102,22 @@ function BigStat({ label, value, hi }: { label: string; value: string; hi?: bool
 function NumberRow({ label, value, onChange, hint, hl }: {
   label: string; value: number; onChange: (n: number) => void; hint?: string; hl?: boolean
 }) {
+  const [draft, setDraft] = useState(String(value))
+
+  useEffect(() => {
+    setDraft(String(value))
+  }, [value])
+
+  const commitDraft = () => {
+    const parsed = Number(draft)
+
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      onChange(Math.round(parsed * 100) / 100)
+    } else {
+      setDraft(String(value))
+    }
+  }
+
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1117,13 +1133,48 @@ function NumberRow({ label, value, onChange, hint, hl }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <button onClick={() => onChange(Math.max(0, value - 1))} style={stepBtn}>−</button>
         <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
           minWidth: 80, textAlign: 'center',
           padding: '4px 12px', borderRadius: 8,
           background: hl ? A.hex : T.surface2,
           color: hl ? A.ink : T.text,
           fontFamily: FONT_MONO, fontSize: 16, fontWeight: 700,
           fontVariantNumeric: 'tabular-nums',
-        }}>${value}</div>
+        }}>
+          <span>$</span>
+          <input
+            inputMode="decimal"
+            value={draft}
+            onChange={event => {
+              const next = event.target.value
+
+              if (/^\d*\.?\d{0,2}$/.test(next)) {
+                setDraft(next)
+              }
+            }}
+            onBlur={commitDraft}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.currentTarget.blur()
+              }
+            }}
+            onFocus={event => event.currentTarget.select()}
+            aria-label={label}
+            style={{
+              width: 64,
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              color: 'inherit',
+              font: 'inherit',
+              fontVariantNumeric: 'inherit',
+              textAlign: 'left',
+              padding: 0,
+            }}
+          />
+        </div>
         <button onClick={() => onChange(value + 1)} style={stepBtn}>+</button>
       </div>
     </div>
