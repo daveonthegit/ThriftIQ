@@ -634,15 +634,17 @@ function MobileNav({
 
 // ─── Source / Search ────────────────────────────────────────────────────────
 function WebSource({
-  onSearch, isMobile, recentSearches, searchingQuery,
+  onSearch, onOpenSearch, isMobile, recentSearches, searchingQuery, openingSearchId,
 }: {
   onSearch: (q: string) => void
+  onOpenSearch: (id: string) => void
   isMobile: boolean
   recentSearches: SearchRecord[]
   searchingQuery: string | null
+  openingSearchId: string | null
 }) {
   const [q, setQ] = useState('')
-  const isSearching = Boolean(searchingQuery)
+  const isSearching = Boolean(searchingQuery || openingSearchId)
   const recentQueries = recentSearches
     .filter((search, index, all) => all.findIndex(item => item.query.toLowerCase() === search.query.toLowerCase()) === index)
     .slice(0, 5)
@@ -748,7 +750,7 @@ function WebSource({
               borderRadius: 14, overflow: 'hidden',
             }}>
               {recentQueries.map((r, i) => (
-                <button key={r.id} onClick={() => onSearch(r.query)} disabled={isSearching} style={{
+                <button key={r.id} onClick={() => onOpenSearch(r.id)} disabled={isSearching} style={{
                   display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                   padding: '12px 14px', background: 'transparent',
                   border: 'none', borderTop: i ? `1px solid ${T.border}` : 'none',
@@ -763,7 +765,7 @@ function WebSource({
                       {r.query}
                     </span>
                     <span style={{ display: 'block', color: T.textFaint, fontFamily: FONT_MONO, fontSize: 10, marginTop: 3 }}>
-                      {r.searchedAt} · ${r.median} median
+                      {openingSearchId === r.id ? 'Opening saved run…' : `${r.searchedAt} · $${r.median} median`}
                     </span>
                   </span>
                 </button>
@@ -1596,11 +1598,12 @@ function Block({
 
 // ─── History ────────────────────────────────────────────────────────────────
 function WebHistory({
-  searches, onOpen, onSearch, isMobile,
+  searches, onOpen, onSearch, openingSearchId, isMobile,
 }: {
   searches: SearchRecord[]
-  onOpen: (query: string) => void
+  onOpen: (id: string) => void
   onSearch: () => void
+  openingSearchId: string | null
   isMobile: boolean
 }) {
   return (
@@ -1627,21 +1630,25 @@ function WebHistory({
         }}>
           <div>Query</div><div>Match</div><div style={{ textAlign: 'right' }}>Median</div><div>Verdict</div><div>When</div>
         </div>
-        {searches.map((run, i) => (
-          <button key={run.id} onClick={() => onOpen(run.query)} style={{
+        {searches.map((run, i) => {
+          const isOpening = openingSearchId === run.id
+
+          return (
+          <button key={run.id} onClick={() => onOpen(run.id)} disabled={Boolean(openingSearchId)} style={{
             width: '100%', display: 'grid',
             gridTemplateColumns: '1.8fr 1.5fr 90px 120px 110px',
             minWidth: 720,
             padding: '14px 18px', alignItems: 'center',
             border: 'none',
             borderBottom: i < searches.length - 1 ? `1px solid ${T.border}` : 'none',
-            background: 'transparent', color: T.text, cursor: 'pointer',
+            background: 'transparent', color: T.text, cursor: openingSearchId ? 'not-allowed' : 'pointer',
             textAlign: 'left',
+            opacity: openingSearchId && !isOpening ? 0.45 : 1,
           }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 700 }}>{run.query}</div>
               <div style={{ fontFamily: FONT_MONO, fontSize: 10, color: T.textFaint, marginTop: 3 }}>
-                {run.confidence} confidence
+                {isOpening ? 'Opening saved run…' : `${run.confidence} confidence`}
               </div>
             </div>
             <div style={{ fontSize: 13, color: T.textMute }}>{run.title}</div>
@@ -1655,7 +1662,8 @@ function WebHistory({
             </div>
             <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: T.textFaint }}>{run.searchedAt}</div>
           </button>
-        ))}
+          )
+        })}
         {searches.length === 0 && (
           <div style={{ padding: '60px 20px', textAlign: 'center', color: T.textMute }}>
             Run a sourcing search and it will appear here.
@@ -1973,6 +1981,7 @@ export function ThriftIQWeb() {
   const [listingFor, setListingFor] = useState<{ item: Item; sellPrice: number } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [searchingQuery, setSearchingQuery] = useState<string | null>(null)
+  const [openingSearchId, setOpeningSearchId] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -2063,7 +2072,7 @@ export function ThriftIQWeb() {
   }
 
   const handleSearch = async (q: string) => {
-    if (searchingQuery) {
+    if (searchingQuery || openingSearchId) {
       return
     }
 
@@ -2083,6 +2092,25 @@ export function ThriftIQWeb() {
       flashToast(error instanceof Error ? error.message : 'Search failed')
     } finally {
       setSearchingQuery(null)
+    }
+  }
+
+  const handleOpenSearch = async (id: string) => {
+    if (searchingQuery || openingSearchId) {
+      return
+    }
+
+    setOpeningSearchId(id)
+    try {
+      const response = await apiFetch<{ item: Item; search: SearchRecord }>('/api/searches/' + id)
+
+      setActiveQuery(response.search.query)
+      setActiveItem(response.item)
+      setRoute('item')
+    } catch (error) {
+      flashToast(error instanceof Error ? error.message : 'Could not open saved search')
+    } finally {
+      setOpeningSearchId(null)
     }
   }
   const handleSave = async ({ item, cost, est }: { item: Item; cost: number; est: number }) => {
@@ -2163,9 +2191,11 @@ export function ThriftIQWeb() {
   if (route === 'search') content = (
     <WebSource
       onSearch={handleSearch}
+      onOpenSearch={handleOpenSearch}
       isMobile={isMobile}
       recentSearches={searches}
       searchingQuery={searchingQuery}
+      openingSearchId={openingSearchId}
     />
   )
   else if (route === 'item' && activeItem) content = <WebItem
@@ -2185,8 +2215,9 @@ export function ThriftIQWeb() {
   else if (route === 'history') content = (
     <WebHistory
       searches={searches}
-      onOpen={handleSearch}
+      onOpen={handleOpenSearch}
       onSearch={() => setRoute('search')}
+      openingSearchId={openingSearchId}
       isMobile={isMobile}
     />
   )
