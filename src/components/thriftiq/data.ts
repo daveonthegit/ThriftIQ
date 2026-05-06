@@ -54,10 +54,12 @@ export const TRENDING = [
 export const RECENT = ['Vintage Nike windbreaker', "Levi's 501 made in usa"]
 
 export type Comp = {
-  price: number; daysAgo: number; condition: string; size: string; soldFast: boolean
+  price: number; daysAgo: number; condition: string; size: string; soldFast: boolean;
+  title?: string; itemUrl?: string | null; imageUrl?: string | null
 }
 export type Item = {
-  id: string; title: string; sub: string; swatch: string; swatch2: string; comps: Comp[]
+  id: string; title: string; sub: string; swatch: string; swatch2: string; comps: Comp[];
+  imageUrl?: string | null
 }
 
 function genComps(prices: number[]): Comp[] {

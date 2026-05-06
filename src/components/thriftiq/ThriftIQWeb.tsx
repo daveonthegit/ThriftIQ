@@ -807,6 +807,10 @@ const sectionLabel: CSSProperties = {
   textTransform: 'uppercase', color: T.textFaint, marginBottom: 14,
 }
 
+function imageBackground(url: string) {
+  return `url("${url.replace(/"/g, '%22')}")`
+}
+
 // ─── Item detail ────────────────────────────────────────────────────────────
 function WebItem({
   query, item, onSave, onListing, onBack, isMobile,
@@ -855,7 +859,21 @@ function WebItem({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, marginBottom: 24 }}>
-        <Swatch a={item.swatch} b={item.swatch2} size={isMobile ? 64 : 88} radius={16} />
+        {item.imageUrl ? (
+          <div aria-hidden="true" style={{
+            width: isMobile ? 64 : 88,
+            height: isMobile ? 64 : 88,
+            borderRadius: 16,
+            backgroundColor: T.surface,
+            backgroundImage: imageBackground(item.imageUrl),
+            backgroundPosition: 'center',
+            backgroundSize: 'cover',
+            border: `1px solid ${T.border}`,
+            flexShrink: 0,
+          }} />
+        ) : (
+          <Swatch a={item.swatch} b={item.swatch2} size={isMobile ? 64 : 88} radius={16} />
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontFamily: display, fontSize: isMobile ? 30 : 38, lineHeight: 1.05,
@@ -929,8 +947,24 @@ function WebItem({
                     fontFamily: FONT_BODY, fontSize: 13, color: tone,
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <Swatch a={item.swatch} b={item.swatch2} size={28} radius={6} />
-                      <span>{item.title.split(' ').slice(0, 4).join(' ')}…</span>
+                      {c.imageUrl ? (
+                        <div aria-hidden="true" style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 7,
+                          backgroundColor: T.surface,
+                          backgroundImage: imageBackground(c.imageUrl),
+                          backgroundPosition: 'center',
+                          backgroundSize: 'cover',
+                          border: `1px solid ${T.border}`,
+                          flexShrink: 0,
+                        }} />
+                      ) : (
+                        <Swatch a={item.swatch} b={item.swatch2} size={28} radius={6} />
+                      )}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {(c.title ?? item.title).split(' ').slice(0, 7).join(' ')}…
+                      </span>
                       {c.soldFast && <WPill kind="accent">fast</WPill>}
                     </div>
                     <div style={{ fontFamily: FONT_MONO }}>{c.size}</div>

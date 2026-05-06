@@ -51,6 +51,7 @@ function cacheRowsToResult(
       size: row.size ?? 'N/A',
       soldFast: index < 3 || daysAgo(row.soldAt) <= 14,
       itemUrl: row.itemUrl,
+      imageUrl: row.imageUrl,
       soldAt: row.soldAt,
       shippingPrice: row.shippingPrice === null ? null : Number(row.shippingPrice),
     }))
@@ -67,6 +68,7 @@ function cacheRowsToResult(
     swatch: '#3A3A3A',
     swatch2: '#1A1A1A',
     comps,
+    imageUrl: comps.find(comp => comp.imageUrl)?.imageUrl ?? null,
   }
 
   return {
@@ -164,6 +166,7 @@ export async function storeEbaySoldListings(query: string, result: EbaySoldComps
     shippingPrice: comp.shippingPrice === null ? null : String(comp.shippingPrice),
     soldAt: comp.soldAt,
     itemUrl: comp.itemUrl,
+    imageUrl: comp.imageUrl,
     condition: comp.condition,
     size: comp.size,
   })))

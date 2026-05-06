@@ -50,6 +50,13 @@
       "when": 1778028000000,
       "tag": "0006_sold_comps_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778026492944,
+      "tag": "0007_sold_comp_cache_images",
+      "breakpoints": true
     }
   ]
 }

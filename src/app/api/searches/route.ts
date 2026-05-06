@@ -155,7 +155,7 @@ export async function POST(request: Request) {
         : String(apifyResult.comps[index].shippingPrice),
       soldAt: apifyResult?.comps[index]?.soldAt ?? new Date(Date.now() - comp.daysAgo * 86_400_000),
       itemUrl: apifyResult?.comps[index]?.itemUrl ?? null,
-      imageUrl: null,
+      imageUrl: apifyResult?.comps[index]?.imageUrl ?? comp.imageUrl ?? null,
     })))
 
     return NextResponse.json({
