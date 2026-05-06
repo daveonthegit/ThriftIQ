@@ -274,7 +274,7 @@ npm run user:revoke-unlimited -- your@email.com
 
 ## Sold Comps
 
-Searches use the Apify `caffein.dev/ebay-sold-listings` actor when `APIFY_TOKEN` is configured. Without `APIFY_TOKEN`, the app falls back to seeded demo comps so local UI work still runs.
+Searches use the Apify `caffein.dev/ebay-sold-listings` actor when `APIFY_TOKEN` is configured. It requests up to 20 sold listings from the last 15 days. Without `APIFY_TOKEN`, the app falls back to seeded demo comps so local UI work still runs.
 
 Add this locally and in Vercel:
 

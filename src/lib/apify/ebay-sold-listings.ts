@@ -81,7 +81,7 @@ export async function fetchEbaySoldListings(query: string): Promise<EbaySoldComp
       signal: controller.signal,
       body: JSON.stringify({
         keyword: query,
-        daysToScrape: 90,
+        daysToScrape: 15,
         count: 20,
         ebaySite: 'ebay.com',
         sortOrder: 'endedRecently',
