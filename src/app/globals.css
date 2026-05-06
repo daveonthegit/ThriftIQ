@@ -51,3 +51,9 @@ select {
     opacity: 0;
   }
 }
+
+@keyframes thriftiq-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

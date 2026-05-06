@@ -4,7 +4,7 @@ import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } fro
 import { Session } from '@supabase/supabase-js'
 import {
   ACCENTS, Accent, FONT_BODY, FONT_DISPLAY_BY_THEME, FONT_MONO,
-  InventoryItem, Item, RECENT, THEMES, Theme, TRENDING,
+  InventoryItem, Item, THEMES, Theme, TRENDING,
   calcProfit, stats,
 } from './data'
 import { Icons, Swatch } from './icons'
@@ -633,8 +633,20 @@ function MobileNav({
 }
 
 // ─── Source / Search ────────────────────────────────────────────────────────
-function WebSource({ onSearch, isMobile }: { onSearch: (q: string) => void; isMobile: boolean }) {
+function WebSource({
+  onSearch, isMobile, recentSearches, searchingQuery,
+}: {
+  onSearch: (q: string) => void
+  isMobile: boolean
+  recentSearches: SearchRecord[]
+  searchingQuery: string | null
+}) {
   const [q, setQ] = useState('')
+  const isSearching = Boolean(searchingQuery)
+  const recentQueries = recentSearches
+    .filter((search, index, all) => all.findIndex(item => item.query.toLowerCase() === search.query.toLowerCase()) === index)
+    .slice(0, 5)
+
   return (
     <div style={{
       flex: 1,
@@ -654,7 +666,7 @@ function WebSource({ onSearch, isMobile }: { onSearch: (q: string) => void; isMo
           <span style={{ fontStyle: 'italic', color: A.hex }}>find</span> today?
         </div>
 
-        <form onSubmit={e => { e.preventDefault(); if (q.trim()) onSearch(q) }}
+        <form onSubmit={e => { e.preventDefault(); if (q.trim() && !isSearching) onSearch(q) }}
           style={{
             marginTop: isMobile ? 28 : 36,
             display: 'flex',
@@ -663,15 +675,18 @@ function WebSource({ onSearch, isMobile }: { onSearch: (q: string) => void; isMo
           }}>
           <div style={{
             flex: 1, display: 'flex', alignItems: 'center', gap: 12,
-            background: T.surface, border: `1px solid ${T.border}`,
+            background: T.surface, border: `1px solid ${isSearching ? A.hex : T.border}`,
             borderRadius: 14, padding: '0 18px', height: isMobile ? 56 : 64,
+            boxShadow: isSearching ? `0 0 0 1px ${A.hex} inset` : undefined,
           }}>
             <span style={{ color: T.textMute, display: 'flex' }}>{Icons.search}</span>
             <input value={q} onChange={e => setQ(e.target.value)}
               placeholder="Search a brand, item, or SKU…  e.g. Carhartt Detroit J97"
+              disabled={isSearching}
               style={{
                 flex: 1, background: 'transparent', border: 'none', outline: 'none',
                 color: T.text, fontFamily: FONT_BODY, fontSize: 17, height: '100%',
+                opacity: isSearching ? 0.65 : 1,
               }} />
             {!isMobile && <span style={{
               fontFamily: FONT_MONO, fontSize: 10, color: T.textFaint,
@@ -679,8 +694,32 @@ function WebSource({ onSearch, isMobile }: { onSearch: (q: string) => void; isMo
               border: `1px solid ${T.border}`, borderRadius: 6,
             }}>⌘K</span>}
           </div>
-          <WBtn type="submit" size="lg" disabled={!q.trim()}>Run comps {Icons.arrow}</WBtn>
+          <WBtn type="submit" size="lg" disabled={!q.trim() || isSearching}>
+            {isSearching ? 'Checking sold comps…' : 'Run comps'} {!isSearching && Icons.arrow}
+          </WBtn>
         </form>
+
+        {isSearching && (
+          <WCard style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12 }} pad={14}>
+            <div style={{
+              width: 18,
+              height: 18,
+              borderRadius: 999,
+              border: `2px solid ${T.borderStrong}`,
+              borderTopColor: A.hex,
+              animation: 'thriftiq-spin .8s linear infinite',
+              flexShrink: 0,
+            }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: T.text }}>
+                Searching {searchingQuery}
+              </div>
+              <div style={{ marginTop: 3, fontSize: 12, color: T.textMute, lineHeight: 1.4 }}>
+                Checking your stored comps first. If they are stale, pulling up to 20 eBay sold listings from the last 15 days.
+              </div>
+            </div>
+          </WCard>
+        )}
 
         <div style={{
           display: 'grid',
@@ -692,10 +731,12 @@ function WebSource({ onSearch, isMobile }: { onSearch: (q: string) => void; isMo
             <div style={sectionLabel}>Trending</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {TRENDING.map(t => (
-                <button key={t} onClick={() => onSearch(t)} style={{
+                <button key={t} onClick={() => onSearch(t)} disabled={isSearching} style={{
                   background: T.surface, border: `1px solid ${T.border}`,
                   color: T.text, padding: '10px 14px', borderRadius: 999,
-                  fontFamily: FONT_BODY, fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                  fontFamily: FONT_BODY, fontSize: 13, fontWeight: 500,
+                  cursor: isSearching ? 'not-allowed' : 'pointer',
+                  opacity: isSearching ? 0.45 : 1,
                 }}>{t}</button>
               ))}
             </div>
@@ -706,18 +747,32 @@ function WebSource({ onSearch, isMobile }: { onSearch: (q: string) => void; isMo
               background: T.surface, border: `1px solid ${T.border}`,
               borderRadius: 14, overflow: 'hidden',
             }}>
-              {RECENT.map((r, i) => (
-                <button key={r} onClick={() => onSearch(r)} style={{
+              {recentQueries.map((r, i) => (
+                <button key={r.id} onClick={() => onSearch(r.query)} disabled={isSearching} style={{
                   display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                   padding: '12px 14px', background: 'transparent',
                   border: 'none', borderTop: i ? `1px solid ${T.border}` : 'none',
                   color: T.text, fontFamily: FONT_BODY, fontSize: 13,
-                  textAlign: 'left', cursor: 'pointer',
+                  textAlign: 'left',
+                  cursor: isSearching ? 'not-allowed' : 'pointer',
+                  opacity: isSearching ? 0.45 : 1,
                 }}>
                   <span style={{ color: T.textFaint, display: 'flex' }}>{Icons.search}</span>
-                  <span style={{ flex: 1 }}>{r}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.query}
+                    </span>
+                    <span style={{ display: 'block', color: T.textFaint, fontFamily: FONT_MONO, fontSize: 10, marginTop: 3 }}>
+                      {r.searchedAt} · ${r.median} median
+                    </span>
+                  </span>
                 </button>
               ))}
+              {recentQueries.length === 0 && (
+                <div style={{ padding: '20px 14px', color: T.textMute, fontSize: 13, lineHeight: 1.45 }}>
+                  Your recent searches will appear here.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1883,6 +1938,7 @@ export function ThriftIQWeb() {
   const [profile, setProfile] = useState<AccountProfile | null>(null)
   const [listingFor, setListingFor] = useState<{ item: Item; sellPrice: number } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [searchingQuery, setSearchingQuery] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -1973,6 +2029,11 @@ export function ThriftIQWeb() {
   }
 
   const handleSearch = async (q: string) => {
+    if (searchingQuery) {
+      return
+    }
+
+    setSearchingQuery(q)
     try {
       const response = await apiFetch<{ item: Item; search: SearchRecord }>('/api/searches', {
         method: 'POST',
@@ -1986,6 +2047,8 @@ export function ThriftIQWeb() {
       setRoute('item')
     } catch (error) {
       flashToast(error instanceof Error ? error.message : 'Search failed')
+    } finally {
+      setSearchingQuery(null)
     }
   }
   const handleSave = async ({ item, cost, est }: { item: Item; cost: number; est: number }) => {
@@ -2063,7 +2126,14 @@ export function ThriftIQWeb() {
   }
 
   let content: ReactNode
-  if (route === 'search') content = <WebSource onSearch={handleSearch} isMobile={isMobile} />
+  if (route === 'search') content = (
+    <WebSource
+      onSearch={handleSearch}
+      isMobile={isMobile}
+      recentSearches={searches}
+      searchingQuery={searchingQuery}
+    />
+  )
   else if (route === 'item' && activeItem) content = <WebItem
     query={activeQuery} item={activeItem}
     onSave={handleSave}
