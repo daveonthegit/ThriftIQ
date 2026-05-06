@@ -80,6 +80,36 @@ function cacheRowsToResult(
   }
 }
 
+function isMissingImageColumnError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const cause = 'cause' in error ? (error as { cause?: unknown }).cause : undefined
+
+  return Boolean(
+    cause &&
+    typeof cause === 'object' &&
+    'code' in cause &&
+    (cause as { code?: unknown }).code === '42703',
+  )
+}
+
+function cacheItemValues(result: EbaySoldCompsResult, cacheId: string, includeImages: boolean) {
+  return result.comps.slice(0, 20).map(comp => ({
+    cacheId,
+    title: comp.title,
+    marketplace: 'ebay',
+    soldPrice: String(comp.price),
+    shippingPrice: comp.shippingPrice === null ? null : String(comp.shippingPrice),
+    soldAt: comp.soldAt,
+    itemUrl: comp.itemUrl,
+    ...(includeImages ? { imageUrl: comp.imageUrl } : {}),
+    condition: comp.condition,
+    size: comp.size,
+  }))
+}
+
 export async function getCachedEbaySoldListings(query: string, options: { allowStale?: boolean } = {}) {
   const normalizedQuery = normalizeSoldCompsQuery(query)
 
@@ -158,16 +188,13 @@ export async function storeEbaySoldListings(query: string, result: EbaySoldComps
     .delete(soldCompCacheItems)
     .where(eq(soldCompCacheItems.cacheId, cache.id))
 
-  await db.insert(soldCompCacheItems).values(result.comps.slice(0, 20).map(comp => ({
-    cacheId: cache.id,
-    title: comp.title,
-    marketplace: 'ebay',
-    soldPrice: String(comp.price),
-    shippingPrice: comp.shippingPrice === null ? null : String(comp.shippingPrice),
-    soldAt: comp.soldAt,
-    itemUrl: comp.itemUrl,
-    imageUrl: comp.imageUrl,
-    condition: comp.condition,
-    size: comp.size,
-  })))
+  try {
+    await db.insert(soldCompCacheItems).values(cacheItemValues(result, cache.id, true))
+  } catch (error) {
+    if (!isMissingImageColumnError(error)) {
+      throw error
+    }
+
+    await db.insert(soldCompCacheItems).values(cacheItemValues(result, cache.id, false))
+  }
 }
