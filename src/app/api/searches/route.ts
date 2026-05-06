@@ -7,6 +7,7 @@ import { db, isDatabaseConfigured } from '@/lib/db/client'
 import { comps, searches } from '@/lib/db/schema'
 import { calcProfit, findItem, stats } from '@/components/thriftiq/data'
 import { searchEntitlementFor } from '@/lib/entitlements'
+import { fetchEbaySoldListings } from '@/lib/apify/ebay-sold-listings'
 
 const BUY_THRESHOLD = 50
 
@@ -95,7 +96,11 @@ export async function POST(request: Request) {
       }
     }
 
-    const item = findItem(parsed.data.query)
+    const apifyResult = await fetchEbaySoldListings(parsed.data.query).catch(error => {
+      console.error('Apify eBay sold listings failed; falling back to seed comps.', error)
+      return null
+    })
+    const item = apifyResult?.item ?? findItem(parsed.data.query)
     const itemStats = stats(item.comps)
     const projected = calcProfit({
       sellPrice: Math.round(itemStats.median),
@@ -110,7 +115,8 @@ export async function POST(request: Request) {
       median: Math.round(itemStats.median),
       confidence: itemStats.confidence,
       verdict,
-      source: 'seed-comps',
+      source: apifyResult ? 'apify-ebay-sold-listings' : 'seed-comps',
+      compCount: item.comps.length,
     }
 
     const [search] = await db
@@ -123,14 +129,17 @@ export async function POST(request: Request) {
       })
       .returning()
 
-    await db.insert(comps).values(item.comps.map(comp => ({
+    await db.insert(comps).values(item.comps.map((comp, index) => ({
       searchId: search.id,
-      title: item.title,
+      title: apifyResult?.comps[index]?.title ?? item.title,
       marketplace: 'ebay',
       soldPrice: String(comp.price),
-      shippingPrice: null,
-      soldAt: new Date(Date.now() - comp.daysAgo * 86_400_000),
-      itemUrl: null,
+      shippingPrice: apifyResult?.comps[index]?.shippingPrice === null ||
+        apifyResult?.comps[index]?.shippingPrice === undefined
+        ? null
+        : String(apifyResult.comps[index].shippingPrice),
+      soldAt: apifyResult?.comps[index]?.soldAt ?? new Date(Date.now() - comp.daysAgo * 86_400_000),
+      itemUrl: apifyResult?.comps[index]?.itemUrl ?? null,
       imageUrl: null,
     })))
 

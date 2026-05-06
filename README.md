@@ -271,3 +271,15 @@ To return a user to the free limit:
 ```powershell
 npm run user:revoke-unlimited -- your@email.com
 ```
+
+## Sold Comps
+
+Searches use the Apify `caffein.dev/ebay-sold-listings` actor when `APIFY_TOKEN` is configured. Without `APIFY_TOKEN`, the app falls back to seeded demo comps so local UI work still runs.
+
+Add this locally and in Vercel:
+
+```text
+APIFY_TOKEN=your_apify_token
+```
+
+The Codex MCP server for Apify uses the same `APIFY_TOKEN` environment variable.

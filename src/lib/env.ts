@@ -27,6 +27,7 @@ const productionEnvironmentSchema = z.object({
   EBAY_CLIENT_ID: z.string().min(1),
   EBAY_CLIENT_SECRET: z.string().min(1),
   EBAY_ENVIRONMENT: ebayEnvironmentSchema,
+  APIFY_TOKEN: z.string().min(1),
 }).refine(
   value => Boolean(value.DATABASE_URL || value.POSTGRES_URL || value.POSTGRES_PRISMA_URL || value.SUPABASE_DB_URL),
   {

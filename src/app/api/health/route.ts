@@ -15,6 +15,7 @@ export function GET() {
       node: process.env.NODE_ENV ?? 'development',
       databaseConfigured: isDatabaseConfigured,
       databaseUrlSource,
+      apifyConfigured: Boolean(process.env.APIFY_TOKEN),
     },
     productionReady: readiness.ready,
     missingProductionEnv: readiness.missing,
