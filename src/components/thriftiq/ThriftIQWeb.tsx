@@ -1,6 +1,6 @@
 'use client'
 
-import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
+import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { Session } from '@supabase/supabase-js'
 import {
   ACCENTS, Accent, FONT_BODY, FONT_DISPLAY_BY_THEME, FONT_MONO,
@@ -15,6 +15,11 @@ type Route = 'search' | 'item' | 'inventory' | 'history' | 'profit' | 'settings'
 const THEME: Theme = 'streetwear'
 const ACCENT: Accent = 'acid'
 const BUY_THRESHOLD = 50
+const SEARCH_COOLDOWN_MS = 4000
+
+function normalizeSearchQuery(query: string) {
+  return query.toLowerCase().trim().replace(/\s+/g, ' ')
+}
 
 const T = THEMES[THEME]
 const A = ACCENTS[ACCENT]
@@ -634,7 +639,7 @@ function MobileNav({
 
 // ─── Source / Search ────────────────────────────────────────────────────────
 function WebSource({
-  onSearch, onOpenSearch, isMobile, recentSearches, searchingQuery, openingSearchId,
+  onSearch, onOpenSearch, isMobile, recentSearches, searchingQuery, openingSearchId, cooldownQuery,
 }: {
   onSearch: (q: string) => void
   onOpenSearch: (id: string) => void
@@ -642,9 +647,12 @@ function WebSource({
   recentSearches: SearchRecord[]
   searchingQuery: string | null
   openingSearchId: string | null
+  cooldownQuery: string | null
 }) {
   const [q, setQ] = useState('')
-  const isSearching = Boolean(searchingQuery || openingSearchId)
+  const normalizedInput = normalizeSearchQuery(q)
+  const isCoolingDown = Boolean(cooldownQuery && normalizedInput && normalizeSearchQuery(cooldownQuery) === normalizedInput)
+  const isSearching = Boolean(searchingQuery || openingSearchId || isCoolingDown)
   const recentQueries = recentSearches
     .filter((search, index, all) => all.findIndex(item => item.query.toLowerCase() === search.query.toLowerCase()) === index)
     .slice(0, 5)
@@ -697,11 +705,11 @@ function WebSource({
             }}>⌘K</span>}
           </div>
           <WBtn type="submit" size="lg" disabled={!q.trim() || isSearching}>
-            {isSearching ? 'Checking sold comps…' : 'Run comps'} {!isSearching && Icons.arrow}
+            {isCoolingDown ? 'Comp just ran' : searchingQuery ? 'Checking sold comps…' : 'Run comps'} {!isSearching && Icons.arrow}
           </WBtn>
         </form>
 
-        {isSearching && (
+        {Boolean(searchingQuery) && (
           <WCard style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12 }} pad={14}>
             <div style={{
               width: 18,
@@ -1982,6 +1990,9 @@ export function ThriftIQWeb() {
   const [toast, setToast] = useState<string | null>(null)
   const [searchingQuery, setSearchingQuery] = useState<string | null>(null)
   const [openingSearchId, setOpeningSearchId] = useState<string | null>(null)
+  const [searchCooldown, setSearchCooldown] = useState<{ query: string; until: number } | null>(null)
+  const searchLockRef = useRef(false)
+  const searchCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -2058,6 +2069,12 @@ export function ThriftIQWeb() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token])
 
+  useEffect(() => () => {
+    if (searchCooldownTimerRef.current) {
+      clearTimeout(searchCooldownTimerRef.current)
+    }
+  }, [])
+
   if (!authReady) return null
 
   if (!session) return <WebSignIn onAuth={() => setAuthReady(true)} />
@@ -2071,19 +2088,44 @@ export function ThriftIQWeb() {
     setRoute('search')
   }
 
+  const startSearchCooldown = (query: string) => {
+    const until = Date.now() + SEARCH_COOLDOWN_MS
+
+    if (searchCooldownTimerRef.current) {
+      clearTimeout(searchCooldownTimerRef.current)
+    }
+
+    setSearchCooldown({ query, until })
+    searchCooldownTimerRef.current = setTimeout(() => {
+      setSearchCooldown(current => current?.query === query && current.until === until ? null : current)
+    }, SEARCH_COOLDOWN_MS)
+  }
+
   const handleSearch = async (q: string) => {
-    if (searchingQuery || openingSearchId) {
+    const query = q.trim()
+    const isCoolingDown = Boolean(
+      searchCooldown &&
+      Date.now() < searchCooldown.until &&
+      normalizeSearchQuery(searchCooldown.query) === normalizeSearchQuery(query),
+    )
+
+    if (!query || searchLockRef.current || searchingQuery || openingSearchId || isCoolingDown) {
+      if (isCoolingDown) {
+        flashToast('That comp just ran. Give it a second before running it again.')
+      }
       return
     }
 
-    setSearchingQuery(q)
+    searchLockRef.current = true
+    startSearchCooldown(query)
+    setSearchingQuery(query)
     try {
       const response = await apiFetch<{ item: Item; search: SearchRecord }>('/api/searches', {
         method: 'POST',
-        body: JSON.stringify({ query: q }),
+        body: JSON.stringify({ query }),
       })
 
-      setActiveQuery(q)
+      setActiveQuery(query)
       setActiveItem(response.item)
       setSearches(prev => [response.search, ...prev.filter(item => item.id !== response.search.id)].slice(0, 20))
       setProfile(prev => prev ? { ...prev, searchCount: prev.searchCount + 1 } : prev)
@@ -2091,6 +2133,7 @@ export function ThriftIQWeb() {
     } catch (error) {
       flashToast(error instanceof Error ? error.message : 'Search failed')
     } finally {
+      searchLockRef.current = false
       setSearchingQuery(null)
     }
   }
@@ -2196,6 +2239,7 @@ export function ThriftIQWeb() {
       recentSearches={searches}
       searchingQuery={searchingQuery}
       openingSearchId={openingSearchId}
+      cooldownQuery={searchCooldown && Date.now() < searchCooldown.until ? searchCooldown.query : null}
     />
   )
   else if (route === 'item' && activeItem) content = <WebItem
