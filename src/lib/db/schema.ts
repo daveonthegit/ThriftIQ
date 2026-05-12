@@ -53,7 +53,6 @@ export const comps = pgTable('comps', {
   shippingPrice: numeric('shipping_price', { precision: 10, scale: 2 }),
   soldAt: timestamp('sold_at', { withTimezone: true }),
   itemUrl: text('item_url'),
-  imageUrl: text('image_url'),
 })
 
 export const soldCompCaches = pgTable('sold_comp_caches', {
@@ -82,7 +81,6 @@ export const soldCompCacheItems = pgTable('sold_comp_cache_items', {
   shippingPrice: numeric('shipping_price', { precision: 10, scale: 2 }),
   soldAt: timestamp('sold_at', { withTimezone: true }),
   itemUrl: text('item_url'),
-  imageUrl: text('image_url'),
   condition: text('condition'),
   size: text('size'),
 })

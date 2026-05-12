@@ -11,21 +11,11 @@ type ApifySoldListing = {
   shippingPrice?: string | number | null
   condition?: string | null
   itemId?: string | null
-  image?: string | null
-  imageUrl?: string | null
-  imageURL?: string | null
-  thumbnail?: string | null
-  thumbnailUrl?: string | null
-  galleryURL?: string | null
-  pictureURL?: string | null
-  images?: Array<string | { url?: string | null }> | null
-  pictureUrls?: Array<string | { url?: string | null }> | null
 }
 
 export type EbaySoldComp = Comp & {
   title: string
   itemUrl: string | null
-  imageUrl: string | null
   soldAt: Date | null
   shippingPrice: number | null
 }
@@ -72,58 +62,6 @@ function soldAt(value: string | null | undefined) {
   const date = new Date(value)
 
   return Number.isNaN(date.getTime()) ? null : date
-}
-
-function asImageUrl(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const trimmed = value.trim()
-
-  if (!/^https?:\/\//i.test(trimmed)) {
-    return null
-  }
-
-  return trimmed
-}
-
-function imageFromCollection(value: unknown): string | null {
-  if (!Array.isArray(value)) {
-    return null
-  }
-
-  for (const entry of value) {
-    const direct = asImageUrl(entry)
-
-    if (direct) {
-      return direct
-    }
-
-    if (entry && typeof entry === 'object' && 'url' in entry) {
-      const nested = asImageUrl((entry as { url?: unknown }).url)
-
-      if (nested) {
-        return nested
-      }
-    }
-  }
-
-  return null
-}
-
-function listingImageUrl(listing: ApifySoldListing) {
-  return (
-    asImageUrl(listing.imageUrl) ||
-    asImageUrl(listing.imageURL) ||
-    asImageUrl(listing.image) ||
-    asImageUrl(listing.thumbnailUrl) ||
-    asImageUrl(listing.thumbnail) ||
-    asImageUrl(listing.galleryURL) ||
-    asImageUrl(listing.pictureURL) ||
-    imageFromCollection(listing.images) ||
-    imageFromCollection(listing.pictureUrls)
-  )
 }
 
 export async function fetchEbaySoldListings(query: string): Promise<EbaySoldCompsResult | null> {
@@ -176,7 +114,6 @@ export async function fetchEbaySoldListings(query: string): Promise<EbaySoldComp
           size: 'N/A',
           soldFast: index < 3 || age <= 14,
           itemUrl: listing.url || null,
-          imageUrl: listingImageUrl(listing),
           soldAt: soldAt(listing.endedAt),
           shippingPrice: parseMoney(listing.shippingPrice),
         }
@@ -196,7 +133,6 @@ export async function fetchEbaySoldListings(query: string): Promise<EbaySoldComp
         swatch: '#3A3A3A',
         swatch2: '#1A1A1A',
         comps,
-        imageUrl: comps.find(comp => comp.imageUrl)?.imageUrl ?? null,
       },
       comps,
       raw,

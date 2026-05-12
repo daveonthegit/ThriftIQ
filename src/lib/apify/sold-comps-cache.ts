@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { Item } from '@/components/thriftiq/data'
 import { db } from '@/lib/db/client'
 import { soldCompCacheItems, soldCompCaches } from '@/lib/db/schema'
@@ -53,7 +53,6 @@ function cacheRowsToResult(
       size: row.size ?? 'N/A',
       soldFast: index < 3 || daysAgo(row.soldAt) <= 14,
       itemUrl: row.itemUrl,
-      imageUrl: row.imageUrl,
       soldAt: row.soldAt,
       shippingPrice: row.shippingPrice === null ? null : Number(row.shippingPrice),
     }))
@@ -70,7 +69,6 @@ function cacheRowsToResult(
     swatch: '#3A3A3A',
     swatch2: '#1A1A1A',
     comps,
-    imageUrl: comps.find(comp => comp.imageUrl)?.imageUrl ?? null,
   }
 
   return {
@@ -82,22 +80,7 @@ function cacheRowsToResult(
   }
 }
 
-function isMissingImageColumnError(error: unknown) {
-  if (!error || typeof error !== 'object') {
-    return false
-  }
-
-  const cause = 'cause' in error ? (error as { cause?: unknown }).cause : undefined
-
-  return Boolean(
-    cause &&
-    typeof cause === 'object' &&
-    'code' in cause &&
-    (cause as { code?: unknown }).code === '42703',
-  )
-}
-
-function cacheItemValues(result: EbaySoldCompsResult, cacheId: string, includeImages: boolean) {
+function cacheItemValues(result: EbaySoldCompsResult, cacheId: string) {
   return result.comps.slice(0, 20).map(comp => ({
     cacheId,
     title: comp.title,
@@ -106,75 +89,9 @@ function cacheItemValues(result: EbaySoldCompsResult, cacheId: string, includeIm
     shippingPrice: comp.shippingPrice === null ? null : String(comp.shippingPrice),
     soldAt: comp.soldAt,
     itemUrl: comp.itemUrl,
-    ...(includeImages ? { imageUrl: comp.imageUrl } : {}),
     condition: comp.condition,
     size: comp.size,
   }))
-}
-
-async function getCacheItemRows(cacheId: string) {
-  try {
-    return await db
-      .select()
-      .from(soldCompCacheItems)
-      .where(eq(soldCompCacheItems.cacheId, cacheId))
-      .orderBy(desc(soldCompCacheItems.soldAt))
-      .limit(20)
-  } catch (error) {
-    if (!isMissingImageColumnError(error)) {
-      throw error
-    }
-
-    const rows = await db.execute<CacheItemRow>(sql`
-      select
-        id,
-        cache_id as "cacheId",
-        title,
-        marketplace,
-        sold_price as "soldPrice",
-        shipping_price as "shippingPrice",
-        sold_at as "soldAt",
-        item_url as "itemUrl",
-        null::text as "imageUrl",
-        condition,
-        size
-      from sold_comp_cache_items
-      where cache_id = ${cacheId}
-      order by sold_at desc
-      limit 20
-    `)
-
-    return Array.from(rows)
-  }
-}
-
-async function insertLegacyCacheItems(result: EbaySoldCompsResult, cacheId: string) {
-  for (const comp of result.comps.slice(0, 20)) {
-    await db.execute(sql`
-      insert into sold_comp_cache_items (
-        cache_id,
-        title,
-        marketplace,
-        sold_price,
-        shipping_price,
-        sold_at,
-        item_url,
-        condition,
-        size
-      )
-      values (
-        ${cacheId},
-        ${comp.title},
-        'ebay',
-        ${String(comp.price)},
-        ${comp.shippingPrice === null ? null : String(comp.shippingPrice)},
-        ${comp.soldAt},
-        ${comp.itemUrl},
-        ${comp.condition},
-        ${comp.size}
-      )
-    `)
-  }
 }
 
 export async function getCachedEbaySoldListings(query: string, options: { allowStale?: boolean } = {}) {
@@ -200,7 +117,12 @@ export async function getCachedEbaySoldListings(query: string, options: { allowS
     return null
   }
 
-  const rows = await getCacheItemRows(cache.id)
+  const rows = await db
+    .select()
+    .from(soldCompCacheItems)
+    .where(eq(soldCompCacheItems.cacheId, cache.id))
+    .orderBy(desc(soldCompCacheItems.soldAt))
+    .limit(20)
 
   return cacheRowsToResult(query, cache, rows, isFresh ? 'hit' : 'stale')
 }
@@ -250,13 +172,5 @@ export async function storeEbaySoldListings(query: string, result: EbaySoldComps
     .delete(soldCompCacheItems)
     .where(eq(soldCompCacheItems.cacheId, cache.id))
 
-  try {
-    await db.insert(soldCompCacheItems).values(cacheItemValues(result, cache.id, true))
-  } catch (error) {
-    if (!isMissingImageColumnError(error)) {
-      throw error
-    }
-
-    await insertLegacyCacheItems(result, cache.id)
-  }
+  await db.insert(soldCompCacheItems).values(cacheItemValues(result, cache.id))
 }

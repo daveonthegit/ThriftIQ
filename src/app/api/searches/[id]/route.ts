@@ -76,7 +76,6 @@ export async function GET(
       size: 'N/A',
       soldFast: index < 3 || daysAgo(comp.soldAt) <= 14,
       itemUrl: comp.itemUrl,
-      imageUrl: comp.imageUrl,
     })).filter(comp => Number.isFinite(comp.price) && comp.price > 0)
 
     const fallback = findItem(search.query)
@@ -87,7 +86,6 @@ export async function GET(
       swatch: fallback.swatch,
       swatch2: fallback.swatch2,
       comps: savedComps.sort((a, b) => a.daysAgo - b.daysAgo),
-      imageUrl: savedComps.find(comp => comp.imageUrl)?.imageUrl ?? null,
     } : fallback
 
     const itemStats = stats(item.comps)
